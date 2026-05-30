@@ -31,6 +31,24 @@ bool SharedState::write_field(StateFieldType type, const std::vector<uint8_t>& p
     return true;
 }
 
+bool SharedState::merge_field(const StateField& remote) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    // Reject if local has a newer or equal entry of the same type
+    for (auto it = log_.rbegin(); it != log_.rend(); ++it) {
+        if (it->type == remote.type) {
+            if (it->timestamp_ns >= remote.timestamp_ns) {
+                return false;
+            }
+            break;
+        }
+    }
+    log_.push_back(remote);
+    if (log_.size() > 10000) {
+        log_.erase(log_.begin(), log_.begin() + (log_.size() - 10000));
+    }
+    return true;
+}
+
 bool SharedState::read_latest(StateFieldType type, StateField& out) {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto it = log_.rbegin(); it != log_.rend(); ++it) {

@@ -54,6 +54,10 @@ public:
     // Read the latest field of a given type
     bool read_latest(StateFieldType type, StateField& out);
 
+    // Merge a remote field if its timestamp is newer than the latest local entry
+    // of the same type. Preserves append-only log semantics.
+    bool merge_field(const StateField& remote);
+
     // Read all fields (for iteration / counting / scanning)
     std::vector<StateField> read_all() const;
 

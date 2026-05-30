@@ -332,8 +332,19 @@ int main() {
                 logger.info("SYNC", "Received " + std::to_string(tlv.size()) +
                             " bytes TLV from remote (" +
                             std::to_string(remote_fields.size()) + " fields)");
-                // In production: merge remote fields into local shared state
-                // with conflict resolution and Origin Vault timestamp validation
+                // Merge remote fields into local shared state with timestamp-based
+                // conflict resolution (Origin Vault validation)
+                for (const auto& rf : remote_fields) {
+                    if (SharedState::instance().merge_field(rf)) {
+                        logger.info("MERGE", "Merged field type=" +
+                                    std::to_string(static_cast<uint32_t>(rf.type)) +
+                                    " ts=" + std::to_string(rf.timestamp_ns));
+                    } else {
+                        logger.info("MERGE", "Rejected stale field type=" +
+                                    std::to_string(static_cast<uint32_t>(rf.type)) +
+                                    " ts=" + std::to_string(rf.timestamp_ns));
+                    }
+                }
             }
         }
 
