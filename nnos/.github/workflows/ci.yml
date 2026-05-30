@@ -1,0 +1,38 @@
+name: NNOS CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install cmake openssl
+
+      - name: Configure (MinSizeRel)
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DOPENSSL_ROOT_DIR=$(brew --prefix openssl)
+
+      - name: Build all daemon targets
+        run: cmake --build build --parallel
+
+      - name: Verify float-free C++ source
+        run: ./scripts/verify_float_free.sh
+
+      - name: Smoke test all daemons
+        run: ./scripts/smoke_test_all.sh
+
+      - name: Verify binary provenance manifest
+        run: |
+          test -f build/provenance/sha256sums.txt
+          wc -l build/provenance/sha256sums.txt
