@@ -1,0 +1,15 @@
+[Container]
+Image=nnos-daemon:latest
+Exec=/usr/bin/lsa_ethernet_sync
+Network=host
+LogDriver=journald
+
+[Service]
+Restart=on-failure
+Environment=NNOS_LOG_DIR=/var/log/lsa
+# IMPORTANT: Set NNOS_SYNC_KEY to a 64-character hex string before production.
+# Default key triggers CRITICAL log and must not be used in production.
+# Environment=NNOS_SYNC_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+
+[Install]
+WantedBy=default.target
