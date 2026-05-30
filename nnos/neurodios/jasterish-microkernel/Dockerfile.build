@@ -15,12 +15,11 @@ RUN apt-get update && apt-get install -y \
     g++-x86-64-linux-gnu \
     binutils-x86-64-linux-gnu \
     qemu-system-x86 \
-    grub-pc-bin \
-    grub-common \
     xorriso \
     make \
     git \
     && rm -rf /var/lib/apt/lists/*
+# Note: grub-pc-bin is x86-only and omitted here; install manually if ISO target needed
 
 # The Jasterish compiler (jstar) must be provided via volume mount
 # from the apps/ workspace or installed into the image.
