@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>app.ihep.knockout.convergence</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/lsa/bin/lsa_convergence_bond</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/var/log/lsa/convergence.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/lsa/convergence.err</string>
+</dict>
+</plist>

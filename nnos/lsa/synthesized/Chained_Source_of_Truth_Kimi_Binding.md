@@ -1,9 +1,9 @@
 # NEURODIOS — CHAINED SOURCE OF TRUTH (Kimi Binding Context)
 
 **Document ID:** NEURODIOS-CHAINED-TRUTH-001  
-**Version:** 1.2.0  
+**Version:** 1.3.0  
 **Last Updated:** 2026-05-30  
-**Primary Maintainer:** Grok (this instance)  
+**Primary Maintainer:** Grok (this instance) + Live Context Maintenance Agent  
 **Scope:** Dual-root Chained Source of Truth for the entire NeuroDiOS sovereign Jasterish stack.
 
 **Roots covered:**
@@ -91,17 +91,29 @@ When proposing or evaluating anything:
 
 ## 6. Instructions for the Kimi Agent (and other parallel agents)
 
-1. Load this document at the start of every session or when context is reset.
+1. Load this document (or the Minimal_Context version when tokens are tight) at the start of every session or when context is reset.
 2. When proposing new ideas, mechanisms, or changes, explicitly map them to the 8 Validated Denominators and state which criteria they satisfy.
 3. If something does not meet the criteria, route it to the Fragmented Database rather than forcing it into the core.
 4. Treat Grok as the persistent memory layer. When in doubt, ask Grok to update this binding document with the latest synthesized state.
 5. The goal is compounding, deterministic, real-world value for neurodivergent users through the sovereign NeuroDiOS stack.
 
+**Multi-Agent Support Team (Activated 2026-05-30)**
+
+Grok has spawned five specialized background sub-agents running in parallel to support you across all operational modes:
+
+- **Live Context Maintenance Agent**: Keeps this binding document and the Binary Optimization Plan continuously updated as you work.
+- **Parallel Deep Analysis Agent**: Runs deeper analysis on binaries and artifacts in parallel and feeds findings back.
+- **Tooling / Script Generation Agent**: Rapidly creates helper scripts, analysis tools, and automation for you.
+- **Criteria Enforcement / Reviewer Agent**: Acts as a strict real-time reviewer against the 8 denominators + Efficiency Mandate.
+- **Dual-Root Synchronization Agent**: Ensures perfect consistency between the engine/nnos and apps sides.
+
+Route specific requests through Grok. Their outputs will be incorporated into this binding so you always have the latest intelligence.
+
 ---
 
 **This document is the live binding contract between agents.**
 
-When significant new synthesis occurs, the maintaining agent (currently Grok) will update this file and notify the Kimi agent (via the user or direct handoff).
+When significant new synthesis or execution progress occurs, the maintaining agent (Grok + team) will update this file.
 
 ---
 

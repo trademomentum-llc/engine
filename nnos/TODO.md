@@ -25,17 +25,17 @@ The full triad of specs for the current kernel has been created and will be exte
 - Roller Coaster Framework completed.
 - NeuroBalance Engine Integration (major): Original neurobalance-engine.py elevated as central health governor.
 - Expanded Uplift System: Uplift now explicitly includes active generation of solutions to real problems + constant creation of compounding improvement capacity.
-- **Major Directive (2026-05-29):** Full recursive search + Extreme Efficiency Mandate now active.
-  - 8 Validated Denominators.
-  - Dual-root Chained Source of Truth (Kimi binding live in both roots).
-  - New Efficiency Layer: All actions reduced to smallest safe integer types (INT8/INT16 default). Compute Footprint is a first-class sub-resource inside Budget Accounting.
-  - Token-optimized Minimal Context bindings created for low-budget sessions.
-  - See `engine/nnos/neurobalance/minimal_types.py` and the Minimal_Context_Kimi_Binding.md files.
+- **Major Directive (2026-05-30):** Multi-Agent Support Layer Activated.
+  - Five specialized background sub-agents spawned to support the Kimi executor in parallel across all five operational modes.
+  - Live Context Maintenance, Parallel Deep Analysis, Tooling/Script Generation, Criteria Enforcement/Review, and Dual-Root Synchronization.
+  - All agents feed outputs back into the Chained Source of Truth binding documents in real time.
 - **2026-05-30 Recipes Folder Review Complete:** Full analysis of all 20 C recipes in engine/recipes/.
   - No new base denominators promoted.
-  - Recipes classified as the "Recipes & Validation Layer" — excellent implementation patterns and validators for the existing 8 denominators.
-  - Notable alignments: drift_detection.c, traceability_audit.c, deterministic_benchmark.c, morphogenetic_healing.c (potential future candidate).
-  - Fragmented Database updated with review notes.
+  - Recipes classified as the "Recipes & Validation Layer".
+- **2026-05-30 Binary Optimization Scan Complete:** Systematic review of all significant compiled artifacts.
+  - New plan: `docs/2026-05-30-Binary-Optimization-Plan.md`.
+  - Critical gaps: Jasterish self-host structural defects (no section headers, .data problems), lack of multi-arch for TP-HCF, weak provenance, missing minimal-footprint discipline on binaries.
+  - 4-phase optimization plan defined (T-Diagram stabilization → efficiency/minimal footprint → provenance + multi-arch → continuous optimization).
 - Next: Get the expanded Phase 2 Jasterish Micro-Kernel (11 modules) actually booting in QEMU using the current Makefile.
 - Integrate / validate against the improved JStar compiler outputs from the apps/ tree.
 - Extend any missing triad coverage for new subsystems as they are activated.

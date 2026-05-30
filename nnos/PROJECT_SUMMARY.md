@@ -57,12 +57,11 @@ The existing nnos daemons (SystemIntegrity, Morphogenetic, Threat, etc.) are int
 
 **Strategic Direction – Option D (Sovereign Platform):** A deliberate long-term path is now active to build a custom, proprietary platform orchestration and control layer on top of the Jasterish Micro-Kernel and NeuroDiOS foundation. The goal is to reduce or eventually eliminate dependence on external heavyweight orchestrators (such as OpenChoreo) for core weight-bearing concerns. Initial Requirements framing for this sovereign direction has been created in `neurodios/docs/2026-05-28-NeuroDiOS-Sovereign-Platform-Kernel-Requirements.md`.
 
-**2026-05-29/30 Full nnos-lsa Synthesis + Recipes Review:** 
+**2026-05-29/30 Full nnos-lsa Synthesis + Recipes Review + Binary Optimization Scan + Multi-Agent Support:** 
 - Entire nnos-lsa folder integrated (original material in engine/nnos/lsa/original/).
-- 8 Validated Denominators remain the foundation after systematic review of the `engine/recipes/` folder (20 C validation recipes).
-- No new base denominators were promoted from the recipes. They primarily serve as concrete implementations and validators for the existing 8 (especially Drift Detection, Traceability, Determinism, and Morphogenetic patterns).
-- One concept (Morphogenetic Repair) noted in Fragmented Database for potential future evaluation.
-- All recipes now understood as the "Recipes & Validation Layer" sitting atop the denominators.
+- 8 Validated Denominators remain the foundation.
+- Major binary scan completed; new Optimization Plan document created.
+- Five specialized background sub-agents spawned to support the Kimi executor in parallel across all five operational modes: Live Context Maintenance, Parallel Deep Analysis, Tooling/Script Generation, Criteria Enforcement/Review, and Dual-Root Synchronization. Their outputs are fed back into the Chained Source of Truth in real time.
 
 What still does not exist:
 - The spec-defined `CMakeLists.txt` and the role-specific `lsa_boot_dcn`, `lsa_boot_hcn`, and `lsa_boot_epn` binaries.
