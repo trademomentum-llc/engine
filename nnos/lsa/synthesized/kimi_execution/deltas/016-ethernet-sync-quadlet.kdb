@@ -1,0 +1,11 @@
+--- KDB v1.0 BEGIN ---
+timestamp: 2026-05-30T21:18:00Z
+binding_version: 1.3.0
+plan_phase: "Deployment artifacts — Podman quadlet for lsa_ethernet_sync"
+denominators_touched: [6,7]
+efficiency_delta: {tokens_delta: -45, compute_class: "INT16", footprint_reduction_bytes: 0}
+decision: "Added nnos-ethernet-sync.container Podman quadlet for rootless/rootful deployment of lsa_ethernet_sync. Configuration: host networking (required for multicast), journald logging, on-failure restart, NNOS_LOG_DIR env var. Includes prominent comment warning that NNOS_SYNC_KEY must be set to 64-char hex before production; default key triggers CRITICAL log. Complements existing generic nnos-daemon.container template with daemon-specific configuration."
+raw_output_ref: "quadlets/nnos-ethernet-sync.container"
+uplift_potential: "Enables declarative container deployment of the sync daemon via systemd generator. Podman quadlets integrate with systemd for automatic restart, logging, and dependency management. Serves Primitive Traceability (#6) via explicit deployment spec, Origin Vault (#7) via version-controlled container definition. Next: add quadlets for remaining functional daemons (drift_detector, convergence_bond, state_monitor) or create a docker-compose style orchestration file for full constellation deployment."
+escalation_request: ["Tooling"]
+--- KDB v1.0 END ---
