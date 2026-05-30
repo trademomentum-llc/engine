@@ -1,0 +1,19 @@
+[Unit]
+Description=NNOS Morphogenetic Maintainer
+Documentation=file:///usr/share/doc/nnos/README.md
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/MorphogeneticMaintainer
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=2s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=morphogenetic_maintainer
+Environment="NNOS_LOG_DIR=/var/log/lsa"
+
+[Install]
+WantedBy=multi-user.target

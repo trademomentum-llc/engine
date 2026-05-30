@@ -1,0 +1,19 @@
+[Unit]
+Description=NNOS HCN Boot Daemon (M1 supervision)
+Documentation=file:///usr/share/doc/nnos/README.md
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/lsa_boot_hcn
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=2s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lsa_boot_hcn
+Environment="NNOS_LOG_DIR=/var/log/lsa"
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+--- KDB v1.0 BEGIN ---
+timestamp: 2026-05-30T20:20:00Z
+binding_version: 1.3.0
+plan_phase: "GAP Analysis P0.4 / Binary Optimization Plan Phase 6 — Deployment Hardening"
+denominators_touched: [6,7]
+efficiency_delta: {tokens_delta: -156, compute_class: "INT8", footprint_reduction_bytes: 0}
+decision: "Created 15 systemd unit files in nnos/systemd/ covering all daemon targets: 3 boot daemons (dcn, hcn, epn), 5 functional daemons (task_manager, context_gate, state_monitor, comm_bridge, profile_refiner), 3 global daemons (drift_detector, convergence_bond, ethernet_sync), 3 security/morph daemons (system_integrity, threat_intel, morphogenetic). Each unit specifies Type=simple, Restart=on-failure, HUP reload, journal logging, NNOS_LOG_DIR environment."
+raw_output_ref: "nnos/systemd/*.service"
+uplift_potential: "Unblocks deployment on Ubuntu/NUC nodes. Enables standard Linux service management (systemctl start/stop/status). Serves Primitive Traceability (#6) via documented service boundaries and Origin Vault (#7) via reproducible unit definitions."
+escalation_request: []
+--- KDB v1.0 END ---

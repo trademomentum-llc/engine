@@ -1,0 +1,19 @@
+[Unit]
+Description=NNOS Task Manager Daemon
+Documentation=file:///usr/share/doc/nnos/README.md
+After=lsa_boot_dcn.service
+Wants=lsa_boot_dcn.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/lsa_task_manager
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=2s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lsa_task_manager
+Environment="NNOS_LOG_DIR=/var/log/lsa"
+
+[Install]
+WantedBy=multi-user.target

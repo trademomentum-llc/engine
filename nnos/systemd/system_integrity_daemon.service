@@ -1,0 +1,19 @@
+[Unit]
+Description=NNOS System Integrity Daemon
+Documentation=file:///usr/share/doc/nnos/README.md
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/SystemIntegrityDaemon
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=2s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=system_integrity_daemon
+Environment="NNOS_LOG_DIR=/var/log/lsa"
+
+[Install]
+WantedBy=multi-user.target
