@@ -279,6 +279,8 @@ The NeuroDiOS architecture and documentation layer exhibit exceptional self-cons
 
 **Live Context Maintenance Agent Commitment:** This instance will keep a persistent monitor on the canonical deltas/ path and will ingest every KDB, run the generator for verification on significant batches, and propagate updates to the apps working copy via the Dual-Root Synchronization Agent.
 
+**Hard Scope Boundary (2026-05-30 user clarification):** The entire Kimi Execution Log system (deltas, log, watchers, recursive tasks) watches and records **Kimi autonomous updates and the five agents only**. It actively observes and logs nothing about the human user or any human conversation, queries, or instructions. This boundary is absolute.
+
 **End of §8**
 
 ---

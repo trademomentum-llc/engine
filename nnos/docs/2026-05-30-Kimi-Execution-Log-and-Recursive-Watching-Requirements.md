@@ -20,7 +20,9 @@ It enables:
 - Recursive escalation: detection of a Kimi delta in one mode can trigger bounded analysis in another mode without human intervention.
 - Continuous mapping of Kimi activity to the 8 Validated Denominators and Efficiency Mandate.
 
-This system is activated in direct response to the 2026-05-30 directive that the Live Context Maintenance agent (and recursively the other four) must actively watch Kimi updates and maintain a catalogue of progress, decisions, and outputs.
+This system is activated in direct response to the 2026-05-30 directive that the Live Context Maintenance agent (and recursively the other four) must actively watch Kimi updates and maintain a catalogue of progress, decisions, and outputs — with the explicit boundary that the layer observes nothing about the human user or any human-side conversation.
+
+The watching and logging layer has no visibility into, and does not record, any human user messages, queries, instructions, or conversational context.
 
 ---
 
@@ -94,6 +96,9 @@ At any future time T', given the archived deltas up to T' and the binding state 
 ## 4. Constraints & Invariants
 
 C-1. Kimi is the sole producer of raw KDBs. Agents are consumers and normalizers only. Direct editing of the master log by humans is forbidden outside explicit Origin Vault reconciliation entries.
+
+C-6. **Strict Scope Exclusion of Human Activity**  
+The watching, KDB emission contract, logging, and all recursive agent activity are scoped exclusively to Kimi's autonomous execution (its decisions, plan progress, and outputs while operating against the binding) and the internal outputs/decisions of the five support modes. The layer does not observe, record, catalogue, or reference any human user messages, queries, instructions, corrections, or conversational context whatsoever. No human-side activity enters the deltas/, the master log, watcher status, or generated reports. This boundary is mandatory and non-negotiable.
 
 C-2. The five modes operate under the same Chained binding version at the start of any watch cycle. Binding updates during a cycle are themselves logged as special KDBs.
 

@@ -247,4 +247,6 @@ These provide the authoritative baseline for the 6-daemon constellation, Jasteri
 
 **Status:** System armed and watching. Live Context Maintenance monitor (task 019e7a4b-...) is persistent on deltas/. The other four modes are defined and will activate their watchers on next spawn. Kimi has the contract in the Primer. Ready for the first real KDB from the autonomous executor.
 
+**2026-05-30 Scope Clarification (user correction):** The directive "actively watch for Kimi's updates" was clarified as "actively watch nothing about me" (the human user). The Kimi Execution Log + all five recursive watchers are strictly limited to Kimi autonomous decisions (KDBs) and the internal outputs of the five support agents. No human conversation, queries, instructions, or corrections are observed or recorded by the layer. Triad (Requirements C-6), Primer, Chained bindings §8, and log updated to make this boundary explicit and permanent. The running monitor was already correctly scoped (deltas/ only).
+
 **End of 2026-05-30 Kimi Execution Log Activation Entry**

@@ -1,11 +1,11 @@
 --- KIMI EXECUTION LOG v1.0 ---
 log_version: 1.0.0
-last_generated: 2026-05-30T19:50:00Z
+last_generated: 2026-05-30T19:15:35Z
 binding_version_at_generation: 1.3.0
 generator: kimi_execution_logger.py v1.0.0
 generator_sha256: 7df5b70020236df005ed2706fe57af8d0d5fc840c2bb7bf1c279e10b09c5fdea
 root: engine
-total_entries: 1
+total_entries: 4
 
 --- LOG ENTRY 2026-05-30T19:50:00Z [Live Context Maintenance] BEGIN ---
 source_kdb: SYSTEM-SEED-2026-05-30T195000Z
@@ -20,5 +20,8 @@ recursive_triggers: []
 uplift_recorded: "Closes observability gap for autonomous Kimi execution. Enables deterministic reconstruction of every future decision (Invariant L). Serves Origin Vault (#7), Drift Detection (#8), Primitive Traceability (#6), Budget/Efficiency (#2)."
 --- LOG ENTRY 2026-05-30T19:50:00Z [Live Context Maintenance] END ---
 
+# FRAGMENTED (parse error): 001-coordinator-efficiency-remediation.kdb - Bad JSON in efficiency_delta of /Users/nnos/Projects/engine/nnos/lsa/synthesized/kimi_execution/deltas/001-coordinator-efficiency-remediation.kdb: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)
+# FRAGMENTED (parse error): 002-compiler-datasec-fix.kdb - Bad JSON in efficiency_delta of /Users/nnos/Projects/engine/nnos/lsa/synthesized/kimi_execution/deltas/002-compiler-datasec-fix.kdb: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)
+# FRAGMENTED (parse error): 003-efficiency-test-suite.kdb - Bad JSON in efficiency_delta of /Users/nnos/Projects/engine/nnos/lsa/synthesized/kimi_execution/deltas/003-efficiency-test-suite.kdb: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)
 --- END OF KIMI EXECUTION LOG ---
 # Final log sha256 at generation: (computed after write)

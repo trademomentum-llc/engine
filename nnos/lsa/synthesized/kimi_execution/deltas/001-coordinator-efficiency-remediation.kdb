@@ -1,0 +1,11 @@
+--- KDB v1.0 BEGIN ---
+timestamp: 2026-05-30T19:42:11Z
+binding_version: 1.3.0
+plan_phase: "Binary Optimization Plan Phase 2, Item 5 — Efficiency & Minimal Footprint"
+denominators_touched: [2,6,8]
+efficiency_delta: {tokens_delta: -312, compute_class: "INT8", footprint_reduction_bytes: 0}
+decision: "Remediated neurobalance_coordinator.py per Criteria Enforcement Agent audit. Eliminated all float literals from hot path; converted thresholds to pre-computed Intensity8 constants; added compute_action_footprint() invocation on every action via _make_offset() factory; added _DENOMINATOR_MAP for ValidatedDenominator→MinimalDenominator bridging; updated docstring to 8 denominators exclusively."
+raw_output_ref: "nnos/neurobalance/neurobalance_coordinator.py#assess_and_offset"
+uplift_potential: "Live health governor now enforces its own Efficiency Mandate. Hot path creates zero float objects. Enables deterministic behavioral control loops on resource-constrained nodes (Orin, embedded)."
+escalation_request: ["Criteria Enforcement"]
+--- KDB v1.0 END ---

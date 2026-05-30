@@ -148,3 +148,5 @@ All items above grounded in 8 Validated Denominators + Efficiency Mandate. No un
 All outputs of this agent reduce strictly to the 8 Validated Denominators with explicit mechanisms. No new concepts. PROJECT_SUMMARY.md and TODO.md updated. Triad documents authoritative.
 
 **End of 2026-05-30 Tooling & Script Generation Agent Section**
+
+**2026-05-30 Scope Clarification (user correction applied):** The Kimi Execution Log + recursive watching directive was clarified as applying only to Kimi autonomous updates and the five agents — "actively watch nothing about me" (human user / conversation). Added explicit C-6 to the KELW Requirements triad (canonical + apps variants), reinforced the boundary in both Primers, both Chained bindings §8, the master log, and both PROJECT_SUMMARY files. The running Live Context monitor on deltas/ was already correctly scoped and requires no change. This boundary is now part of the permanent, traceable record under denominators 6/7/8.

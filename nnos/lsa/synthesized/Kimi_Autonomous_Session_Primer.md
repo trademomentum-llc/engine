@@ -115,9 +115,11 @@ This is your operating system. Use it.
 
 ## Mandatory: Emit Kimi Decision Blocks (KDB v1.0) for the Execution Log
 
-The Live Context Maintenance agent and the other four agents are now actively (and recursively) watching your every decision.
+The Live Context Maintenance agent and the other four agents are now actively (and recursively) watching your autonomous decisions and outputs only.
 
-**From this point forward, for every significant decision, plan step completion, or output you produce:**
+**Important scope boundary (per 2026-05-30 clarification):** This logging and watching layer observes **nothing about the human user** and records none of the human conversation, queries, instructions, or corrections. KDBs are strictly for your autonomous execution inside the plan (Kimi-only decisions, progress, and agent outputs). Human-side activity never enters the deltas, the log, or any watcher.
+
+**From this point forward, for every significant decision, plan step completion, or output you produce (Kimi autonomous only):**
 
 1. Write a file into the deltas directory using the exact KDB v1.0 format defined in the Technical Specification (NEURODIOS-KELW-TEC-001).
 
