@@ -34,6 +34,7 @@ enum class StateFieldType : uint32_t {
     PROFILE_STATE            = 0x08,
     INTERVENTION_TIER        = 0x09,
     DRIFT_SCORE              = 0x0A,
+    SNAPSHOT_HASH            = 0x0B,
     // Additive only until v2.0
 };
 

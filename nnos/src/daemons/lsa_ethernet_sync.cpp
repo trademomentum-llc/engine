@@ -284,6 +284,16 @@ static std::vector<StateField> deserialize_fields(const std::vector<uint8_t>& da
 // Main
 // ---------------------------------------------------------------------------
 
+// FNV-1a 64-bit hash for snapshot convergence verification
+static uint64_t fnv1a_hash(const uint8_t* data, size_t len) {
+    uint64_t hash = 0xcbf29ce484222325;
+    for (size_t i = 0; i < len; ++i) {
+        hash ^= data[i];
+        hash *= 0x100000001b3;
+    }
+    return hash;
+}
+
 int main() {
     SignalHandler::install([]{});
     Logger logger("lsa_ethernet_sync");
@@ -309,6 +319,7 @@ int main() {
                 "packets are length-framed only");
 #endif
 
+    int cycle = 0;
     while (!SignalHandler::should_shutdown()) {
         // Collect and send local state
         auto fields = SharedState::instance().read_all();
@@ -323,6 +334,26 @@ int main() {
             }
         }
 
+        // Every 6 cycles (~30s), broadcast snapshot hash for convergence verification
+        if (++cycle % 6 == 0) {
+            auto snap = SharedState::instance().snapshot();
+            uint64_t hash = fnv1a_hash(snap.data(), snap.size());
+
+            StateField hash_field;
+            hash_field.type = StateFieldType::SNAPSHOT_HASH;
+            hash_field.timestamp_ns = 0; // hash itself is the identity
+            hash_field.payload.resize(8);
+            for (int i = 0; i < 8; ++i) {
+                hash_field.payload[i] = static_cast<uint8_t>(hash >> (i * 8));
+            }
+
+            auto tlv = serialize_fields({hash_field});
+            auto cipher = encrypt_packet(tlv);
+            if (sock.send(cipher)) {
+                logger.info("SYNC", "Broadcast snapshot hash=" + std::to_string(hash));
+            }
+        }
+
         // Attempt to receive from other nodes
         auto cipher = sock.recv();
         if (!cipher.empty()) {
@@ -332,17 +363,29 @@ int main() {
                 logger.info("SYNC", "Received " + std::to_string(tlv.size()) +
                             " bytes TLV from remote (" +
                             std::to_string(remote_fields.size()) + " fields)");
-                // Merge remote fields into local shared state with timestamp-based
-                // conflict resolution (Origin Vault validation)
+
                 for (const auto& rf : remote_fields) {
-                    if (SharedState::instance().merge_field(rf)) {
-                        logger.info("MERGE", "Merged field type=" +
-                                    std::to_string(static_cast<uint32_t>(rf.type)) +
-                                    " ts=" + std::to_string(rf.timestamp_ns));
+                    if (rf.type == StateFieldType::SNAPSHOT_HASH && rf.payload.size() >= 8) {
+                        uint64_t remote_hash = 0;
+                        for (int i = 0; i < 8; ++i) {
+                            remote_hash |= static_cast<uint64_t>(rf.payload[i]) << (i * 8);
+                        }
+                        auto local_snap = SharedState::instance().snapshot();
+                        uint64_t local_hash = fnv1a_hash(local_snap.data(), local_snap.size());
+                        bool converged = (remote_hash == local_hash);
+                        logger.info("CONVERGE", "remote_hash=" + std::to_string(remote_hash) +
+                                    " local_hash=" + std::to_string(local_hash) +
+                                    " status=" + (converged ? "MATCH" : "DIVERGED"));
                     } else {
-                        logger.info("MERGE", "Rejected stale field type=" +
-                                    std::to_string(static_cast<uint32_t>(rf.type)) +
-                                    " ts=" + std::to_string(rf.timestamp_ns));
+                        if (SharedState::instance().merge_field(rf)) {
+                            logger.info("MERGE", "Merged field type=" +
+                                        std::to_string(static_cast<uint32_t>(rf.type)) +
+                                        " ts=" + std::to_string(rf.timestamp_ns));
+                        } else {
+                            logger.info("MERGE", "Rejected stale field type=" +
+                                        std::to_string(static_cast<uint32_t>(rf.type)) +
+                                        " ts=" + std::to_string(rf.timestamp_ns));
+                        }
                     }
                 }
             }
