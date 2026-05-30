@@ -1,8 +1,9 @@
 # Binary Optimization Plan — NeuroDiOS / Jasterish Sovereign Stack
 
 **Document ID:** NEURODIOS-BIN-OPT-001  
-**Version:** 1.0  
-**Date:** 2026-05-30
+**Version:** 1.1  
+**Date:** 2026-05-30  
+**Last Maintained:** 2026-05-30 (Live Context Maintenance Agent baseline pass)
 
 ---
 
@@ -16,6 +17,10 @@ A scan of all significant compiled artifacts across the active development roots
 3. Production daemons and kernel artifacts are not yet being built with the minimal-footprint discipline (stripping, LTO, smallest safe data types in emitted code, etc.).
 4. Very weak linkage between built binaries and the provenance / traceability requirements (Origin Vault, Primitive Traceability).
 5. The sovereign Jasterish Micro-Kernel has a good Makefile but no active, verified build artifacts in the current tree.
+
+**Binding Layer Status (2026-05-30 Live Context Maintenance Baseline):** This plan is now referenced from the canonical Chained_Source_of_Truth_Kimi_Binding.md (both roots, v1.3.0). All phases explicitly serve denominators #2 (Budget/Compute Footprint), #6 (Primitive Traceability), #7 (Origin Vault), #8 (Drift Detection) and the Efficiency Mandate (smallest safe integer types in codegen + build profiles, provenance manifests, reproducible hashes). No new denominators; strict consistency maintained.
+
+**2026-05-30 Criteria Enforcement / Reviewer Agent Baseline Audit Cross-Link:** Full audit record (including critical flag on neurobalance_coordinator.py Efficiency violation) incorporated into Chained bindings (both roots) §8 and PROJECT_SUMMARY/TODO. Binary Opt phases 2+ (Efficiency & Minimal Footprint, Provenance/Traceability) now gated on remediation of the live governor's non-use of minimal_types + footprint calculator. See Criteria Enforcement Record in bindings for deterministic justification requirements on all future changes. No impact to Phase 1 stabilization work.
 
 ---
 
@@ -82,6 +87,24 @@ A scan of all significant compiled artifacts across the active development roots
 10. Make the NeuroBalance Engine (once ported to run on the sovereign kernel) actively monitor and report Compute Footprint of running binaries/daemons.
 11. Use successful minimal-footprint improvements as "compounding wins" in the Improvement Ledger.
 12. Feed binary optimization insights back into the Roller Coaster cycles (use the contrast between bloated vs minimal builds as a source of system-level uplift).
+
+---
+
+## Current Execution Status (2026-05-30 Baseline — Live Context Maintenance)
+
+**No Kimi executor progress beyond plan creation observed in this cycle.** The following records the exact state at agent instantiation for deterministic tracking (Origin Vault principle).
+
+- **Phase 1 (Immediate Stabilization):** ACTIVE on apps root. Root cause of jstar3 .data truncation (missing string literal + global variable emission in compiler.jstr Phase 5 codegen) identified. Work in progress: implement data emission to datasec, data_len increment, offset patching (see apps/TODO.md items and jstar_bootstrap_out/ artifacts). Directly enforces #6 Primitive Traceability, #7 Origin Vault, determinism, and minimal binary structure. Dual-root Chained binding cross-references this as primary near-term uplift.
+
+- **Phase 2 (Efficiency & Minimal Footprint):** Not started. Pre-requisite: Phase 1 stabilization. Will apply minimal_types discipline (INT8/INT16 preference) to Jasterish codegen and NNOS daemon release profiles (LTO, -Oz, strip). Maps to Efficiency Mandate + denominator #2.
+
+- **Phase 3 (Provenance, Traceability & Multi-Arch):** Not started. Requires stable T-Diagram. Will embed manifests linking binaries to commit + primitive_map.json + compiler version; establish x86_64/aarch64 cross-build for TP-HCF nodes.
+
+- **Phase 4 (Continuous):** Not started. Depends on NeuroBalance port to kernel + successful minimal wins.
+
+**Drift Detection hook:** Existing scripts/binary_drift_check.sh and recipes/drift_detection.c provide foundation. Binding requires SHA256 + section layout + size comparison on every jstar* and daemon build once Phase 1 completes.
+
+**Relationship to 8 Denominators + Efficiency (re-validated this pass):** All gaps and phases remain strictly derived from the denominators enumerated in Chained_Source_of_Truth_Kimi_Binding.md §2. No deviations.
 
 ---
 
