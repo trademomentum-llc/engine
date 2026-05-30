@@ -1,0 +1,19 @@
+# Per-daemon Dockerfile for independent container deployment
+# Usage: docker build -f Dockerfile.daemon --build-arg DAEMON=lsa_task_manager .
+
+FROM ubuntu:22.04 AS builder
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y build-essential cmake git libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+COPY . .
+ARG DAEMON=lsa_task_manager
+RUN cmake -B build -S . -DCMAKE_BUILD_TYPE=MinSizeRel -DNNOS_ENABLE_LTO=ON \
+    && cmake --build build --target ${DAEMON} -j$(nproc)
+
+FROM ubuntu:22.04 AS runtime
+RUN mkdir -p /var/log/lsa
+ENV NNOS_LOG_DIR=/var/log/lsa
+ARG DAEMON=lsa_task_manager
+COPY --from=builder /build/build/${DAEMON} /usr/bin/daemon
+CMD ["/usr/bin/daemon"]

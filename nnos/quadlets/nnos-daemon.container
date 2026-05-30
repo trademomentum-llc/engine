@@ -1,0 +1,12 @@
+[Container]
+Image=nnos-daemon:latest
+Exec=/usr/bin/lsa_boot_dcn
+Network=host
+LogDriver=journald
+
+[Service]
+Restart=on-failure
+Environment=NNOS_LOG_DIR=/var/log/lsa
+
+[Install]
+WantedBy=default.target
