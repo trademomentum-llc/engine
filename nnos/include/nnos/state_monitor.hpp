@@ -6,9 +6,9 @@
 namespace nnos {
 
 struct PhysiologicalState {
-    float heart_rate_variability;  // 0.0-1.0, normalized
-    float noise_level;             // 0.0-1.0
-    float light_level;             // 0.0-1.0
+    uint8_t heart_rate_variability;  // 0-255, normalized
+    uint8_t noise_level;             // 0-255
+    uint8_t light_level;             // 0-255
     uint16_t notifications_count;
     uint8_t self_report_overwhelm;  // 0-10
 } __attribute__((packed));
@@ -24,18 +24,18 @@ class StateMonitor {
 public:
     explicit StateMonitor(const NeuroProfile& profile)
         : profile_(profile) {}
-    
-    // NNOS_SENSORY_REGULATION procedure
+
+    // NNOS_SENSORY_REGULATION procedure (integer-only hot path)
     InterventionTier assess_and_intervene(const PhysiologicalState& state) noexcept {
-        float sensory_load = compute_sensory_load(state);
-        float emotional_load = compute_emotional_load(state);
-        float total_load = (sensory_load + emotional_load) / 2.0f;
-        
-        const float threshold = profile_.thresholds.sensory_alert_threshold;
-        
-        if (total_load < 0.6f * threshold) {
+        uint16_t sensory_load = compute_sensory_load(state);
+        uint16_t emotional_load = compute_emotional_load(state);
+        uint16_t total_load = (sensory_load + emotional_load) / 2;
+
+        uint16_t threshold = (static_cast<uint16_t>(profile_.thresholds.sensory_alert_threshold) * 100) / 255;
+
+        if (total_load < (threshold * 60) / 100) {
             return InterventionTier::NONE;
-        } else if (total_load < 0.9f * threshold) {
+        } else if (total_load < (threshold * 90) / 100) {
             apply_tier1(state);
             return InterventionTier::ADJUST_ENVIRONMENT;
         } else if (total_load < threshold) {
@@ -46,52 +46,49 @@ public:
             return InterventionTier::EMERGENCY_SHUTDOWN;
         }
     }
-    
+
+    // Exposed for observability / logging
+    uint16_t compute_sensory_load(const PhysiologicalState& state) const noexcept {
+        // Convert 0-255 inputs to 0-100 scale
+        uint16_t noise = (static_cast<uint16_t>(state.noise_level) * 100) / 255;
+        uint16_t light = (static_cast<uint16_t>(state.light_level) * 100) / 255;
+        uint16_t sensitivity = static_cast<uint16_t>(profile_.sensory_sensitivity_level) * 25;
+
+        uint16_t load = 0;
+        load += (noise * sensitivity * 40) / 10000;
+        load += (light * sensitivity * 30) / 10000;
+        load += (state.notifications_count > 100 ? 100 : static_cast<uint16_t>(state.notifications_count)) * 30 / 100;
+
+        return (load > 100) ? 100 : load;
+    }
+
+    uint16_t compute_emotional_load(const PhysiologicalState& state) const noexcept {
+        uint16_t hrv = (static_cast<uint16_t>(state.heart_rate_variability) * 100) / 255;
+        uint16_t overwhelm = static_cast<uint16_t>(state.self_report_overwhelm) * 10;
+
+        uint16_t load = 0;
+        load += ((100 - hrv) * 50) / 100;
+        load += (overwhelm * 50) / 100;
+
+        return (load > 100) ? 100 : load;
+    }
+
 private:
     const NeuroProfile& profile_;
-    
-    float compute_sensory_load(const PhysiologicalState& state) const noexcept {
-        float load = 0.0f;
-        
-        // Weight factors based on sensory sensitivity level
-        float sensitivity_multiplier = static_cast<float>(profile_.sensory_sensitivity_level) / 4.0f;
-        
-        load += state.noise_level * sensitivity_multiplier * 0.4f;
-        load += state.light_level * sensitivity_multiplier * 0.3f;
-        load += (state.notifications_count / 100.0f) * 0.3f;  // cap at 100
-        
-        return load > 1.0f ? 1.0f : load;
-    }
-    
-    float compute_emotional_load(const PhysiologicalState& state) const noexcept {
-        float load = 0.0f;
-        
-        load += (1.0f - state.heart_rate_variability) * 0.5f;
-        load += (state.self_report_overwhelm / 10.0f) * 0.5f;
-        
-        return load > 1.0f ? 1.0f : load;
-    }
-    
+
     void apply_tier1(const PhysiologicalState& state) const noexcept {
+        (void)state;
         // Tier 1: Environmental adjustments
-        // In real implementation, these would trigger hardware/OS calls
-        // reduce_brightness();
-        // reduce_volume();
-        // disable_non_critical_notifications();
     }
-    
+
     void apply_tier2(const PhysiologicalState& state) const noexcept {
+        (void)state;
         // Tier 2: Guided regulation
-        // trigger_breathing_exercise();
-        // suggest_movement_break();
-        // enable_stimming_mode();
     }
-    
+
     void apply_tier3(const PhysiologicalState& state) const noexcept {
+        (void)state;
         // Tier 3: Emergency protocol
-        // suspend_all_non_critical_tasks();
-        // notify_trusted_contact();
-        // log_context_for_recovery();
     }
 };
 

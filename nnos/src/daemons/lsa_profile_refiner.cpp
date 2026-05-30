@@ -33,17 +33,17 @@ int main() {
             observed.hyperfocus_inclination = TraitLevel::VERY_HIGH;
             observed.sensory_sensitivity_level = TraitLevel::HIGH;
             observed.social_energy_capacity = TraitLevel::LOW;
-            observed.confidence = 0.0f;
+            observed.confidence = 0;
 
             NeuroProfile matched = matcher.match_profile(observed);
 
             logger.info("BATCH", "Matched profile_id=" + std::to_string(matched.profile_id) +
-                        " confidence=" + std::to_string(matched.confidence));
+                        " confidence=" + std::to_string(matched.confidence) + "/255");
 
             // Publish refined profile to shared state
             std::vector<uint8_t> payload{
                 matched.profile_id,
-                static_cast<uint8_t>(matched.confidence * 255)
+                matched.confidence
             };
             SharedState::instance().write_field(StateFieldType::PROFILE_STATE, payload);
 

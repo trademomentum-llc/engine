@@ -14,8 +14,8 @@ struct NodeHealth {
     uint32_t node_id;
     bool online;
     uint32_t last_seen_sec;
-    float cpu_temp_c;
-    float memory_pressure;
+    uint16_t cpu_temp_deci_c;         // temperature in tenths of °C (e.g. 451 = 45.1°C)
+    uint16_t memory_pressure_permille; // 0–1000 (permille, e.g. 500 = 50.0%)
     uint32_t daemon_count;
 };
 

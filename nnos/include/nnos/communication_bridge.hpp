@@ -44,9 +44,8 @@ public:
 
     CommDecision evaluate(const IncomingRequest& req,
                           const CapacitySnapshot& cap) const noexcept {
-        // Compute a simple capacity score (0-1)
-        float capacity_score = compute_capacity_score(cap);
-        float demand_score = compute_demand_score(req);
+        uint16_t capacity_score = compute_capacity_score(cap);
+        uint16_t demand_score = compute_demand_score(req);
 
         CommDecision decision{};
         decision.new_est_effort_min = req.est_effort_min;
@@ -55,7 +54,7 @@ public:
         decision.require_decompression_after = false;
 
         // Hard guard: if capacity too low relative to demand
-        if (capacity_score < 0.3f && demand_score > 0.6f) {
+        if (capacity_score < 30 && demand_score > 60) {
             decision.type = CommDecisionType::DECLINE;
             decision.confidence = 95;
             return decision;
@@ -64,7 +63,6 @@ public:
         // If social battery is low and request is socially intense
         if (cap.social_battery < 3 && req.social_intensity > 6 &&
             has_vulnerability(VulnerabilityFlag::SOCIAL_BURNOUT)) {
-            // Prefer async and shorter scope
             decision.type = CommDecisionType::NEGOTIATE_SCOPE;
             decision.new_est_effort_min = req.est_effort_min / 2;
             decision.suggest_async = true;
@@ -76,7 +74,7 @@ public:
         // If time pressure is high vs energy, negotiate deadline
         if (req.deadline_hours < 4 && cap.energy < 5) {
             decision.type = CommDecisionType::NEGOTIATE_DEADLINE;
-            decision.new_deadline_hours = static_cast<uint16_t>(req.deadline_hours * 1.5);
+            decision.new_deadline_hours = static_cast<uint16_t>(req.deadline_hours * 3 / 2);
             decision.confidence = 85;
             return decision;
         }
@@ -94,11 +92,11 @@ public:
     // Anti-masking check: compare intended commitment vs estimated capacity
     bool is_likely_masking(const IncomingRequest& req,
                            const CapacitySnapshot& cap) const noexcept {
-        float capacity_score = compute_capacity_score(cap);
-        float demand_score = compute_demand_score(req);
+        uint16_t capacity_score = compute_capacity_score(cap);
+        uint16_t demand_score = compute_demand_score(req);
 
         // Heuristic: agreeing to high-demand task with low capacity
-        if (capacity_score < 0.4f && demand_score > 0.7f) {
+        if (capacity_score < 40 && demand_score > 70) {
             return true;
         }
         return false;
@@ -111,31 +109,27 @@ private:
         return (profile_.vulnerabilities & static_cast<uint32_t>(v)) != 0;
     }
 
-    float compute_capacity_score(const CapacitySnapshot& cap) const noexcept {
-        // weighted average, normalized
-        float energy = cap.energy / 10.0f;
-        float sensory = 1.0f - (cap.sensory_load / 10.0f);
-        float social = cap.social_battery / 10.0f;
-        float commitments = 1.0f - (cap.existing_commitment_load / 10.0f);
+    uint16_t compute_capacity_score(const CapacitySnapshot& cap) const noexcept {
+        // All inputs are 0-10. Scale to 0-100.
+        uint16_t energy = cap.energy * 10;          // 0-100
+        uint16_t sensory = (10 - cap.sensory_load) * 10; // 0-100
+        uint16_t social = cap.social_battery * 10;   // 0-100
+        uint16_t commitments = (10 - cap.existing_commitment_load) * 10; // 0-100
 
-        float score = 0.4f * energy +
-                      0.3f * sensory +
-                      0.2f * social +
-                      0.1f * commitments;
-        return score < 0.0f ? 0.0f : (score > 1.0f ? 1.0f : score);
+        uint16_t score = (energy * 40 + sensory * 30 + social * 20 + commitments * 10) / 100;
+        return score;
     }
 
-    float compute_demand_score(const IncomingRequest& req) const noexcept {
-        float effort = req.est_effort_min / 240.0f; // 4h = 1.0
-        if (effort > 1.0f) effort = 1.0f;
+    uint16_t compute_demand_score(const IncomingRequest& req) const noexcept {
+        // effort: 4h = 1.0. In 0-100 scale: min(est_effort_min * 100 / 240, 100)
+        uint16_t effort = req.est_effort_min * 100 / 240;
+        if (effort > 100) effort = 100;
 
-        float importance = req.importance / 10.0f;
-        float social = req.social_intensity / 10.0f;
+        uint16_t importance = req.importance * 10; // 0-100
+        uint16_t social = req.social_intensity * 10; // 0-100
 
-        float score = 0.5f * effort +
-                      0.3f * importance +
-                      0.2f * social;
-        return score < 0.0f ? 0.0f : (score > 1.0f ? 1.0f : score);
+        uint16_t score = (effort * 50 + importance * 30 + social * 20) / 100;
+        return score;
     }
 };
 

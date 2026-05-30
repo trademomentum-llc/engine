@@ -19,17 +19,17 @@ int main() {
     NeuroProfile profile = profiles::SENSORY_SOCIAL_FRAGILE;
     StateMonitor monitor(profile);
 
-    // Stub: random generator for simulated sensor data
+    // Stub: random generator for simulated sensor data (integer 0-255)
     std::mt19937 rng(std::random_device{}());
-    std::uniform_real_distribution<float> hr_dist(0.4f, 0.9f);
-    std::uniform_real_distribution<float> noise_dist(0.0f, 1.0f);
-    std::uniform_real_distribution<float> light_dist(0.0f, 1.0f);
+    std::uniform_int_distribution<uint16_t> hr_dist(102, 230);   // ~0.4-0.9
+    std::uniform_int_distribution<uint16_t> noise_dist(0, 255);
+    std::uniform_int_distribution<uint16_t> light_dist(0, 255);
 
     while (!SignalHandler::should_shutdown()) {
         PhysiologicalState state{};
-        state.heart_rate_variability = hr_dist(rng);
-        state.noise_level = noise_dist(rng);
-        state.light_level = light_dist(rng);
+        state.heart_rate_variability = static_cast<uint8_t>(hr_dist(rng));
+        state.noise_level = static_cast<uint8_t>(noise_dist(rng));
+        state.light_level = static_cast<uint8_t>(light_dist(rng));
         state.notifications_count = 3;
         state.self_report_overwhelm = 4;
 
@@ -43,8 +43,8 @@ int main() {
             case InterventionTier::EMERGENCY_SHUTDOWN: tier_str = "EMERGENCY"; break;
         }
 
-        float sensory_load = state.noise_level * 0.4f + state.light_level * 0.3f + (state.notifications_count / 100.0f) * 0.3f;
-        logger.info("ASSESS", "tier=" + tier_str + " sensory_load=" + std::to_string(sensory_load));
+        uint16_t sensory_load = monitor.compute_sensory_load(state);
+        logger.info("ASSESS", "tier=" + tier_str + " sensory_load=" + std::to_string(sensory_load) + "/100");
 
         // Publish intervention tier to shared state
         std::vector<uint8_t> payload{static_cast<uint8_t>(tier)};

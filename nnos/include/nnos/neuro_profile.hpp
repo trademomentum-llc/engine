@@ -61,7 +61,7 @@ struct NeuroProfile {
         uint16_t min_recovery_block_minutes;
         uint8_t max_context_switches_per_hour;
         uint16_t max_social_minutes_per_day;
-        float sensory_alert_threshold;     // 0.0 - 1.0
+        uint8_t sensory_alert_threshold;   // 0-255 (maps to 0.0-1.0)
     } thresholds;
     
     // Rhythm slots (24-hour encoded as minute offsets)
@@ -74,7 +74,7 @@ struct NeuroProfile {
     std::array<TimeSlot, 4> rest_slots;
     
     uint8_t profile_id;  // for tracking which template this came from
-    float confidence;    // 0.0 - 1.0, how well does live data match this profile
+    uint8_t confidence;  // 0-255, how well does live data match this profile
 } __attribute__((packed));
 
 static_assert(sizeof(NeuroProfile) < 256, "Profile must fit in cache line");
@@ -104,7 +104,7 @@ constexpr NeuroProfile SYSTEMS_HYPERFOCUS = {
         .min_recovery_block_minutes = 15,
         .max_context_switches_per_hour = 2,
         .max_social_minutes_per_day = 60,
-        .sensory_alert_threshold = 0.5f
+        .sensory_alert_threshold = 128
     },
     
     .deep_work_slots = {{
@@ -124,7 +124,7 @@ constexpr NeuroProfile SYSTEMS_HYPERFOCUS = {
     }},
     
     .profile_id = 1,
-    .confidence = 0.0f
+    .confidence = 0
 };
 
 constexpr NeuroProfile DIVERGENT_CREATIVE = {
@@ -149,7 +149,7 @@ constexpr NeuroProfile DIVERGENT_CREATIVE = {
         .min_recovery_block_minutes = 10,
         .max_context_switches_per_hour = 4,
         .max_social_minutes_per_day = 120,
-        .sensory_alert_threshold = 0.6f
+        .sensory_alert_threshold = 153
     },
     
     .deep_work_slots = {{
@@ -169,7 +169,7 @@ constexpr NeuroProfile DIVERGENT_CREATIVE = {
     }},
     
     .profile_id = 2,
-    .confidence = 0.0f
+    .confidence = 0
 };
 
 constexpr NeuroProfile SENSORY_SOCIAL_FRAGILE = {
@@ -194,7 +194,7 @@ constexpr NeuroProfile SENSORY_SOCIAL_FRAGILE = {
         .min_recovery_block_minutes = 20,
         .max_context_switches_per_hour = 3,
         .max_social_minutes_per_day = 30,
-        .sensory_alert_threshold = 0.4f
+        .sensory_alert_threshold = 102
     },
     
     .deep_work_slots = {{
@@ -214,7 +214,7 @@ constexpr NeuroProfile SENSORY_SOCIAL_FRAGILE = {
     }},
     
     .profile_id = 3,
-    .confidence = 0.0f
+    .confidence = 0
 };
 
 constexpr NeuroProfile INTENSE_MOOD_VARIANCE = {
@@ -238,7 +238,7 @@ constexpr NeuroProfile INTENSE_MOOD_VARIANCE = {
         .min_recovery_block_minutes = 20,
         .max_context_switches_per_hour = 5,
         .max_social_minutes_per_day = 180,
-        .sensory_alert_threshold = 0.65f
+        .sensory_alert_threshold = 166
     },
     
     .deep_work_slots = {{
@@ -257,7 +257,7 @@ constexpr NeuroProfile INTENSE_MOOD_VARIANCE = {
     }},
     
     .profile_id = 4,
-    .confidence = 0.0f
+    .confidence = 0
 };
 
 // Array of all profile templates for matcher
