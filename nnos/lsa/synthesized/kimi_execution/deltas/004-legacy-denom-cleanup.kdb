@@ -1,0 +1,11 @@
+--- KDB v1.0 BEGIN ---
+timestamp: 2026-05-30T20:15:00Z
+binding_version: 1.3.0
+plan_phase: "Binary Optimization Plan Phase 3, Item 7 — Provenance & Traceability / legacy reconciliation"
+denominators_touched: [6,7,8]
+efficiency_delta: {tokens_delta: -203, compute_class: "INT8", footprint_reduction_bytes: 0}
+decision: "Executed chained_source_maintainer.py directive: 30 legacy '5 Validated Denominators' references detected across 15 files. Added HISTORICAL notices to 6 pre-2026-05-29 docs. Updated current docs (PROJECT_SUMMARY.md, TODO.md, GAP_ANALYSIS) with historical markers. Appended tooling agent pass to Chained binding §7. Updated Binary Optimization Plan with execution status for Phases 1-3."
+raw_output_ref: "nnos/lsa/synthesized/Chained_Source_of_Truth_Kimi_Binding.md#tooling-agent-pass"
+uplift_potential: "Eliminates ambiguity between historical 5-denom and canonical 8-denom language. Prevents future agents from using outdated denominator count as ground truth. Serves Primitive Traceability (#6) and Origin Vault (#7)."
+escalation_request: []
+--- KDB v1.0 END ---

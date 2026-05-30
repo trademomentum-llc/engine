@@ -64,24 +64,31 @@ A scan of all significant compiled artifacts across the active development roots
 
 ### Phase 1 — Immediate Stabilization (1–2 weeks)
 1. Fix the Jasterish self-host .data / section header problem so that self-hosted outputs are structurally valid ELF with proper sections (repeat the earlier codegen diagnosis and apply fixes to compiler.jstr Phase 5).
+   - **STATUS (2026-05-30):** Partially complete. Simple global variable datasec allocation enabled in compiler.jstr (lines 2515-2528). Previously DISABLED — all simple globals fell through to stack allocation. String literal emission was already active. Verification requires NUC Linux session (apps/ root under active Linux control; jstar2/jstar3 are ELF64 binaries that cannot be executed on macOS). See apps/TODO.md for ongoing Phase 5 work.
 2. Add deterministic build verification to the existing `jstar_bootstrap_check.sh` and Makefile:
    - Record SHA256 of final .bin/.elf.
    - Compare against previous known-good on every build.
+   - **STATUS (2026-05-30):** CMake provenance_manifest target generates sha256sums.txt at build time. `generate_provenance_manifest.sh` produces JSON manifests with git commit + compiler + per-binary hashes. `binary_drift_check.sh` compares current build against baseline. Verified on MinSizeRel build.
 3. Produce at least one verified, bootable Jasterish Micro-Kernel binary using the current Makefile + a stable jstar (Rust bootstrap for now).
+   - **STATUS (2026-05-30):** Dockerfile.build created for cross-compilation environment. `build_jmk_docker.sh` provides one-command Docker build. Makefile is mature but requires x86_64-elf-ld / jstar compiler from apps/ tree. Blocked on macOS; NUC Linux session is the correct execution environment.
 
 ### Phase 2 — Efficiency & Minimal Footprint (2–4 weeks)
 4. Apply the `minimal_types` discipline to the Jasterish codegen where possible (prefer 16-bit/8-bit immediates and registers for control flow, bounds checks, etc.).
 5. Add release optimization flags to the NNOS daemon build (LTO, -Os or -Oz, strip debug symbols from __LINKEDIT).
+   - **STATUS (2026-05-30):** Complete. CMake MinSizeRel profile active with `-Os -fno-rtti -fno-exceptions`. LTO enabled via `check_ipo_supported()`. Post-link strip implemented per-platform (Darwin: `-x`, Linux: `--strip-all`). Size reduction: 56–69% vs debug build (e.g., lsa_context_gate: 181K → 56K). 13 binaries verified.
 6. Create a "minimal footprint" build profile for the Jasterish compiler itself (smaller emitted code for the sovereign kernel use case).
 
 ### Phase 3 — Provenance, Traceability & Multi-Arch (4–8 weeks)
 7. Integrate binary provenance into the Origin Vault / Primitive Traceability system:
    - Every produced .bin/.elf must embed or be accompanied by a manifest linking it to source commit + primitive map + compiler version.
+   - **STATUS (2026-05-30):** `generate_provenance_manifest.sh` produces JSON manifest with git commit, compiler version, primitive map ref, and per-binary sha256/size/file_type. Flat `sha256sums.txt` for quick verification. CMake install target includes provenance. Verified on MinSizeRel build.
 8. Establish cross-compilation for the TP-HCF:
    - x86_64 ELF daemons and kernel for NUC nodes.
    - aarch64 for Orin / M1 nodes.
    - Unified build system (CMake or the existing Makefile extended).
+   - **STATUS (2026-05-30):** CMake toolchain files created: `cmake/toolchains/x86_64-linux-gnu.cmake` (NUC, `-march=x86-64-v2`) and `cmake/toolchains/aarch64-linux-gnu.cmake` (Orin, `-march=armv8.2-a+crc+crypto`). Not yet verified due to lack of cross-compilers on macOS build host.
 9. Add automated binary drift detection (hash + size + section layout comparison) as part of the existing `drift_detection.c` / recipe infrastructure.
+   - **STATUS (2026-05-30):** `binary_drift_check.sh` compares current build artifacts against baseline manifest. Exit 0 = no drift, Exit 1 = drift detected, Exit 2 = missing baseline. Verified against MinSizeRel provenance manifest.
 
 ### Phase 4 — Continuous Optimization & Uplift
 10. Make the NeuroBalance Engine (once ported to run on the sovereign kernel) actively monitor and report Compute Footprint of running binaries/daemons.

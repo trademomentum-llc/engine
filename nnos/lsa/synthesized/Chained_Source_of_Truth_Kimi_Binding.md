@@ -144,6 +144,12 @@ Route specific requests through Grok. Their outputs will be incorporated into th
 
 **Efficiency Mandate status:** Live in coordinator hot paths. Binary plan and compiler work now required to apply smallest-safe-integer discipline to emitted code and build profiles. Token-optimized Minimal_Context variants exist in both roots for agent use.
 
+**Tooling Agent Pass (2026-05-30T20:10:00Z):**
+- efficiency_mandate_auditor.py: Re-audit post-remediation → COMPLIANT (0 violations, 0 files affected). Hot paths scanned: assess_and_offset, generate_uplift_opportunities, recommend, update_denominators.
+- binary_footprint_analyzer.py: 13 binaries analyzed (all aarch64 Mach-O). 0 oversized flags. Average size 156K. Recommendations: TP-HCF x86_64 cross-build, provenance manifest pairing, LTO/-Oz/strip for Phase 2.
+- chained_source_maintainer.py: 30 legacy "5 Validated Denominators" references detected across 15 files. All marked HISTORICAL with pointer to 2026-05-29-NeuroDiOS-Validated-Denominators.md. No coherence issues in active documents.
+- Kimi executor actions taken: Coordinator remediation committed (f5aeff3), compiler.jstr datasec fix applied (apps/jstar/compiler.jstr#2515-2528), 3 KDBs emitted and verified (Invariant L holds).
+
 **Next maintenance triggers:** Any Kimi executor output, new binary (jstar* or daemon), coordinator change, or cross-root decision. All updates will cite explicit mapping to the 8 + Efficiency.
 
 ---

@@ -21,7 +21,7 @@ The full triad of specs for the current kernel has been created and will be exte
 **2026-05-29 Session Priority after Pivot:** 
 - Foundational primitives work completed: Catalogue of Behavioral Health Condition Primitives + full triad created.
 - Roller Coaster Framework (major new artifact) completed: primitives clustered and analyzed through mirror/counter/orthogonal/synth/observer/anchored relational modes; anchoring by emulation of a prime defined; controlled stress-relief cycles for uplift/insight generation specified with full triad.
-- Systemic Denominators Dissection completed: 5 Validated Denominators extracted and accepted.
+- Systemic Denominators Dissection completed: 5 Validated Denominators (historical; 8 canonical since 2026-05-29) extracted and accepted.
 - Roller Coaster Framework completed.
 - NeuroBalance Engine Integration (major): Original neurobalance-engine.py elevated as central health governor.
 - Expanded Uplift System: Uplift now explicitly includes active generation of solutions to real problems + constant creation of compounding improvement capacity.
@@ -69,7 +69,7 @@ The full triad of specs for the current kernel has been created and will be exte
 
 **2026-05-30 Dual-Root Synchronization Agent — Initial Audit Additions (This Pass):**
 - Created full authoritative triad (Requirements + Design Specification + Technical Specification) for the agent itself per governing rules. Canonical copies in engine/nnos/docs/2026-05-30-Dual-Root-Synchronization-Agent-*.md; identical copies placed in apps/docs/ for coherence.
-- Performed full cross-root scan: microkernel sources verified byte-identical (SHA-256 proof on README); Chained bindings content-coherent (authorized VARIANT); legacy "5 Validated Denominators" language flagged in multiple engine docs and code (see updated PROJECT_SUMMARY for exact locations and mapping to denominators 6/7).
+- Performed full cross-root scan: microkernel sources verified byte-identical (SHA-256 proof on README); Chained bindings content-coherent (authorized VARIANT); legacy "5 Validated Denominators (historical; 8 canonical since 2026-05-29)" language flagged in multiple engine docs and code (see updated PROJECT_SUMMARY for exact locations and mapping to denominators 6/7).
 - Binary Optimization Plan and Efficiency-Minimal-Footprint-Layer docs exist only in engine; referenced from apps binding — distribution asymmetry flagged (violates Origin Vault #7, Drift Detection #8, Efficiency Mandate).
 - Minimal_Context variants present but require strengthened variant rule.
 - Automation: 85% structural/hash/legacy-scan safe for deterministic script (see Technical Spec pseudocode + dual_root_sync_check.py sketch). Remaining 15% (semantic compiler/kernel compatibility) requires Criteria Enforcement Agent.

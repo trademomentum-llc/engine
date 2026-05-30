@@ -47,7 +47,7 @@ Artifacts from `~/Projects/nnos-lsa` have been organized into `~/Projects/engine
 | File | Lines | What It Does | Gap |
 |------|-------|--------------|-----|
 | `neurobalance/neurobalance_engine.py` | 1,101 | Original state assessment engine: primitive extraction, mechanism derivation, state scoring, gap identification, action recommendations from signal events | Not integrated with C++ daemons; no IPC |
-| `neurobalance/neurobalance_coordinator.py` | 278 | Coordinator layer on top of engine: 5 Validated Denominators, Roller Coaster phase awareness, offset engines, uplift opportunity generation | Not integrated with C++ daemons; no IPC |
+| `neurobalance/neurobalance_coordinator.py` | 278 | Coordinator layer on top of engine: 5 Validated Denominators (historical; 8 canonical since 2026-05-29), Roller Coaster phase awareness, offset engines, uplift opportunity generation | Not integrated with C++ daemons; no IPC |
 
 ### 2.3 Jasterish Microkernel (~12,700 lines)
 
