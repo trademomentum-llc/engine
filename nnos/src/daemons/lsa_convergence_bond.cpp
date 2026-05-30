@@ -26,19 +26,23 @@ int main() {
     logger.info("BOOT", "Convergence bond starting");
 
     while (!SignalHandler::should_shutdown()) {
-        auto fields = SharedState::instance().read_all();
-
-        // Build a deterministic snapshot of current state
-        std::vector<uint8_t> snapshot;
-        for (const auto& f : fields) {
-            snapshot.push_back(static_cast<uint8_t>(f.type));
-            snapshot.insert(snapshot.end(), f.payload.begin(), f.payload.end());
-        }
+        // Obtain deterministic folded snapshot (latest entry per field type)
+        std::vector<uint8_t> snapshot = SharedState::instance().snapshot();
 
         uint64_t state_hash = fnv1a_hash(snapshot.data(), snapshot.size());
 
+        // Extract folded entry count from snapshot header (offset 4, little-endian)
+        uint32_t folded_count = 0;
+        if (snapshot.size() >= 8) {
+            folded_count = static_cast<uint32_t>(snapshot[4]) |
+                          (static_cast<uint32_t>(snapshot[5]) << 8) |
+                          (static_cast<uint32_t>(snapshot[6]) << 16) |
+                          (static_cast<uint32_t>(snapshot[7]) << 24);
+        }
+
         logger.info("VERIFY", "State hash=" + std::to_string(state_hash) +
-                    " fields=" + std::to_string(fields.size()));
+                    " folded=" + std::to_string(folded_count) +
+                    " bytes=" + std::to_string(snapshot.size()));
 
         // In a real deployment, this hash would be compared across all nodes
         // via the Ethernet sync layer to verify convergence.
