@@ -110,12 +110,112 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Crypto stub — AES-256-GCM requires OpenSSL or libsodium
+// AES-256-GCM encryption via OpenSSL (when available)
+// Packet format: [12-byte IV][ciphertext][16-byte tag]
 // ---------------------------------------------------------------------------
 
+#ifdef NNOS_HAS_OPENSSL
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+
+class SyncCrypto {
+public:
+    static constexpr size_t KEY_LEN = 32;
+    static constexpr size_t IV_LEN  = 12;
+    static constexpr size_t TAG_LEN = 16;
+
+    SyncCrypto() {
+        const char* env_key = std::getenv("NNOS_SYNC_KEY");
+        if (env_key && std::strlen(env_key) == 64) {
+            for (size_t i = 0; i < KEY_LEN; ++i) {
+                key_[i] = hex_byte(env_key + 2*i);
+            }
+        } else {
+            std::memset(key_, 0, KEY_LEN);
+        }
+    }
+
+    bool is_default_key() const {
+        for (size_t i = 0; i < KEY_LEN; ++i) if (key_[i] != 0) return false;
+        return true;
+    }
+
+    std::vector<uint8_t> encrypt(const std::vector<uint8_t>& plain) {
+        std::vector<uint8_t> out(IV_LEN + plain.size() + TAG_LEN);
+        if (RAND_bytes(out.data(), static_cast<int>(IV_LEN)) != 1) {
+            return {};
+        }
+
+        EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+        if (!ctx) return {};
+
+        int len = 0;
+        bool ok = true;
+        ok = ok && (EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), nullptr, nullptr, nullptr) == 1);
+        ok = ok && (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, static_cast<int>(IV_LEN), nullptr) == 1);
+        ok = ok && (EVP_EncryptInit_ex(ctx, nullptr, nullptr, key_, out.data()) == 1);
+        ok = ok && (EVP_EncryptUpdate(ctx, out.data() + IV_LEN, &len,
+                                      plain.data(), static_cast<int>(plain.size())) == 1);
+        int final_len = 0;
+        ok = ok && (EVP_EncryptFinal_ex(ctx, out.data() + IV_LEN + len, &final_len) == 1);
+        ok = ok && (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG,
+                                         static_cast<int>(TAG_LEN),
+                                         out.data() + IV_LEN + plain.size()) == 1);
+        EVP_CIPHER_CTX_free(ctx);
+        return ok ? out : std::vector<uint8_t>{};
+    }
+
+    std::vector<uint8_t> decrypt(const std::vector<uint8_t>& cipher) {
+        if (cipher.size() < IV_LEN + TAG_LEN) return {};
+        size_t ct_len = cipher.size() - IV_LEN - TAG_LEN;
+
+        std::vector<uint8_t> out(ct_len);
+        const uint8_t* iv  = cipher.data();
+        const uint8_t* ct  = cipher.data() + IV_LEN;
+        const uint8_t* tag = cipher.data() + IV_LEN + ct_len;
+
+        EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+        if (!ctx) return {};
+
+        int len = 0;
+        bool ok = true;
+        ok = ok && (EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), nullptr, nullptr, nullptr) == 1);
+        ok = ok && (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, static_cast<int>(IV_LEN), nullptr) == 1);
+        ok = ok && (EVP_DecryptInit_ex(ctx, nullptr, nullptr, key_, iv) == 1);
+        ok = ok && (EVP_DecryptUpdate(ctx, out.data(), &len, ct, static_cast<int>(ct_len)) == 1);
+        ok = ok && (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG,
+                                         static_cast<int>(TAG_LEN),
+                                         const_cast<uint8_t*>(tag)) == 1);
+        int final_len = 0;
+        if (EVP_DecryptFinal_ex(ctx, out.data() + len, &final_len) != 1) {
+            out.clear(); // Authentication failed
+        }
+        EVP_CIPHER_CTX_free(ctx);
+        return ok ? out : std::vector<uint8_t>{};
+    }
+
+private:
+    uint8_t key_[KEY_LEN];
+
+    static uint8_t hex_nibble(char c) {
+        if (c >= '0' && c <= '9') return static_cast<uint8_t>(c - '0');
+        if (c >= 'a' && c <= 'f') return static_cast<uint8_t>(c - 'a' + 10);
+        if (c >= 'A' && c <= 'F') return static_cast<uint8_t>(c - 'A' + 10);
+        return 0;
+    }
+    static uint8_t hex_byte(const char* p) {
+        return static_cast<uint8_t>((hex_nibble(p[0]) << 4) | hex_nibble(p[1]));
+    }
+};
+
+static SyncCrypto g_crypto;
+#endif // NNOS_HAS_OPENSSL
+
 static std::vector<uint8_t> encrypt_packet(const std::vector<uint8_t>& plain) {
-    // STUB: Real implementation would AES-256-GCM encrypt
-    // For now, pass through with length-prefixed framing
+#ifdef NNOS_HAS_OPENSSL
+    return g_crypto.encrypt(plain);
+#else
+    // Fallback: length-prefixed framing only (no confidentiality or integrity)
     std::vector<uint8_t> out;
     uint32_t len = static_cast<uint32_t>(plain.size());
     out.push_back(static_cast<uint8_t>(len >> 24));
@@ -124,10 +224,13 @@ static std::vector<uint8_t> encrypt_packet(const std::vector<uint8_t>& plain) {
     out.push_back(static_cast<uint8_t>(len));
     out.insert(out.end(), plain.begin(), plain.end());
     return out;
+#endif
 }
 
 static std::vector<uint8_t> decrypt_packet(const std::vector<uint8_t>& cipher) {
-    // STUB: Real implementation would AES-256-GCM decrypt and verify MAC
+#ifdef NNOS_HAS_OPENSSL
+    return g_crypto.decrypt(cipher);
+#else
     if (cipher.size() < 4) return {};
     uint32_t len = (static_cast<uint32_t>(cipher[0]) << 24) |
                    (static_cast<uint32_t>(cipher[1]) << 16) |
@@ -135,6 +238,7 @@ static std::vector<uint8_t> decrypt_packet(const std::vector<uint8_t>& cipher) {
                    static_cast<uint32_t>(cipher[3]);
     if (len + 4 > cipher.size()) return {};
     return std::vector<uint8_t>(cipher.begin() + 4, cipher.begin() + 4 + len);
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -193,7 +297,17 @@ int main() {
 
     logger.info("BOOT", "Ethernet sync active on " + std::string(MCAST_GROUP) +
                 ":" + std::to_string(MCAST_PORT));
-    logger.warn("CRYPTO", "AES-256-GCM is stubbed — packets are length-framed only");
+#ifdef NNOS_HAS_OPENSSL
+    if (g_crypto.is_default_key()) {
+        logger.critical("CRYPTO", "AES-256-GCM active but using default key — "
+                        "set NNOS_SYNC_KEY to a 64-char hex string before production");
+    } else {
+        logger.info("CRYPTO", "AES-256-GCM encryption active");
+    }
+#else
+    logger.warn("CRYPTO", "AES-256-GCM unavailable (OpenSSL not linked) — "
+                "packets are length-framed only");
+#endif
 
     while (!SignalHandler::should_shutdown()) {
         // Collect and send local state

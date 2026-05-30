@@ -97,6 +97,15 @@ nnos_daemon(lsa_profile_refiner   src/daemons/lsa_profile_refiner.cpp)
 nnos_daemon(lsa_drift_detector    src/daemons/lsa_drift_detector.cpp)
 nnos_daemon(lsa_convergence_bond  src/daemons/lsa_convergence_bond.cpp)
 nnos_daemon(lsa_ethernet_sync     src/daemons/lsa_ethernet_sync.cpp)
+# Link OpenSSL for AES-256-GCM sync encryption when available
+find_package(OpenSSL)
+if(OpenSSL_FOUND)
+    target_compile_definitions(lsa_ethernet_sync PRIVATE NNOS_HAS_OPENSSL)
+    target_link_libraries(lsa_ethernet_sync OpenSSL::SSL OpenSSL::Crypto)
+    message(STATUS "OpenSSL found — lsa_ethernet_sync will use AES-256-GCM")
+else()
+    message(WARNING "OpenSSL not found — lsa_ethernet_sync crypto will be stubbed")
+endif()
 
 # -----------------------------------------------------------------------------
 # Security & Intelligence Daemons
