@@ -1,0 +1,11 @@
+--- KDB v1.0 BEGIN ---
+timestamp: 2026-05-30T21:20:00Z
+binding_version: 1.3.0
+plan_phase: "Tooling — Automated Daemon Smoke Test Suite"
+denominators_touched: [6,8]
+efficiency_delta: {tokens_delta: -178, compute_class: "INT16", footprint_reduction_bytes: 0}
+decision: "Created scripts/smoke_test_all.sh: builds all 14 daemon targets, runs each with 3-second timeout, verifies BOOT log presence, counts unexpected CRITICAL logs (with exclusions for known expected warnings: default crypto key, 0 nodes in empty state, random threat CRITICAL). Discovered and fixed log filename mismatch: logger uses lowercase_underscore names while binaries use CamelCase, so script now derives log name from daemon name via sed transform. All 14 daemons pass: 11 LSA + 3 Security/Intelligence."
+raw_output_ref: "scripts/smoke_test_all.sh"
+uplift_potential: "Provides regression-gate automation for the entire daemon constellation. Can be run in CI on every commit to verify no daemon crashes on boot. Catches unexpected CRITICAL logs that indicate functional regressions. Serves Primitive Traceability (#6) via explicit pass/fail criteria, Drift Detection (#8) via automated regression catching. Next: extend smoke test to verify specific functional behaviors (e.g., ethernet sync receives packet, convergence bond computes hash, drift detector stays nominal with zero payload)."
+escalation_request: ["Tooling"]
+--- KDB v1.0 END ---
