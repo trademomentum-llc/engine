@@ -1,0 +1,18 @@
+[Unit]
+Description=LSA State Monitor Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=lsa
+Group=lsa
+ExecStart=/opt/lsa/bin/lsa_state_monitor
+Restart=always
+RestartSec=2s
+LimitNOFILE=65535
+Environment="NNOS_NODE_ROLE=EPN"
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

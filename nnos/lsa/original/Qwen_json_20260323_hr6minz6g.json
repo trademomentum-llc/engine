@@ -1,0 +1,10 @@
+{
+  "J-014_PROFILE_REFINEMENT": {
+    "node": "M1",
+    "atomic_dependencies": ["C052_RANDOM_FOREST", "P040_AGG_MEAN", "P042_AGG_SD"]
+  },
+  "J-019_DRIFT_DETECTION": {
+    "node": "NUC",
+    "atomic_dependencies": ["C061_TS_AUTOCORRELATION", "P047_AGG_QUANTILE"]
+  }
+}

@@ -1,0 +1,35 @@
+# macOS
+.DS_Store
+
+# Build artifacts
+build/
+*.o
+*.a
+*.so
+*.dylib
+
+# Compiled binaries at root (legacy)
+/engine
+
+# Large binary files
+*.pdf
+*.zip
+*.docx
+*.xlsx
+
+# Store artifacts
+store/*.lst
+
+# Editor
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Logs
+*.log
+
+# Python cache
+__pycache__/
+*.pyc
