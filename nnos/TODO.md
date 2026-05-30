@@ -149,4 +149,18 @@ All outputs of this agent reduce strictly to the 8 Validated Denominators with e
 
 **End of 2026-05-30 Tooling & Script Generation Agent Section**
 
+**2026-05-30 NeuroDiOS Non-Invasive Neural Link (NINL) — New Primary Development Track**
+
+Full triad established (NEURODIOS-NINL-REQ/DES/TEC-001) in both roots. This is the hardware realization of the "Neural Link" in the project name.
+
+Immediate priorities:
+- Define concrete electromagnetic wave resonance sensor head power envelope and minimal viable channel count for v1.0 prototype.
+- Specify the exact fixed-point signal processing pipeline (windowing → features in Intensity8/FixedQ7_9 → discrete command + prompt tokens).
+- Design the bidirectional interface between the Neural Link Governor and the live NeuroBalance Coordinator + Roller Coaster (including neural_load metric and forced coasting).
+- Extend the historical shared memory neural_link concept with a high-rate neural token ring buffer.
+- Ensure every generated token carries full provenance (pipeline version, raw window id, user state at generation time) for Origin Vault and Drift Detection.
+- All NINL development work by autonomous agents must be emitted as KDBs and appear in the Kimi Execution Log.
+
+This track takes precedence as the original core intent of NeuroDiOS. All other work (kernel bring-up, compiler stabilization, etc.) continues in support of eventually running a safe, minimal NINL driver and interpretation layer on the sovereign Jasterish Micro-Kernel.
+
 **2026-05-30 Scope Clarification (user correction applied):** The Kimi Execution Log + recursive watching directive was clarified as applying only to Kimi autonomous updates and the five agents — "actively watch nothing about me" (human user / conversation). Added explicit C-6 to the KELW Requirements triad (canonical + apps variants), reinforced the boundary in both Primers, both Chained bindings §8, the master log, and both PROJECT_SUMMARY files. The running Live Context monitor on deltas/ was already correctly scoped and requires no change. This boundary is now part of the permanent, traceable record under denominators 6/7/8.

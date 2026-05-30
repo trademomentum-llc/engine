@@ -250,3 +250,31 @@ These provide the authoritative baseline for the 6-daemon constellation, Jasteri
 **2026-05-30 Scope Clarification (user correction):** The directive "actively watch for Kimi's updates" was clarified as "actively watch nothing about me" (the human user). The Kimi Execution Log + all five recursive watchers are strictly limited to Kimi autonomous decisions (KDBs) and the internal outputs of the five support agents. No human conversation, queries, instructions, or corrections are observed or recorded by the layer. Triad (Requirements C-6), Primer, Chained bindings §8, and log updated to make this boundary explicit and permanent. The running monitor was already correctly scoped (deltas/ only).
 
 **End of 2026-05-30 Kimi Execution Log Activation Entry**
+
+**2026-05-30 NeuroDiOS Non-Invasive Neural Link (NINL) Subsystem — Triad Established**
+
+**Context:** User directive to move beyond the software/kernel/observability scaffolding into the original core vision of the project: a true non-invasive neural link between user and system using electromagnetic wave resonance (or equivalent safe modalities) to receive and interpret brain waves as commands and prompts.
+
+**Deliverable:** Complete authoritative triad created:
+- engine/nnos/docs/2026-05-30-NeuroDiOS-NonInvasive-Neural-Link-Requirements.md (canonical)
+- ...-Design-Specification.md
+- ...-Technical-Specification.md
+
+Mirrored as VARIANT copies to apps/docs/ for dual-root visibility.
+
+**Key Design Decisions (Grounded in Existing Work):**
+- The link is a first-class, high-bandwidth sensory input channel that feeds the existing SensoryLoadIndex and multi-channel models from the Behavioral Health Primitives.
+- It is placed under absolute governance of the NeuroBalance Coordinator and the Roller Coaster Framework (high-engagement neural input periods must be followed by enforced coasting).
+- All hot-path processing after initial physics must use Intensity8 / Delta8 / FixedQ7_9 (Efficiency Mandate + minimal footprint).
+- "nnos_neural_link" shared memory from earlier daemon designs is the natural software egress point for the new hardware-derived tokens (now extended with a high-rate neural ring buffer).
+- Strict scope: the link reads the user's brain signals for command generation. It does not observe or log human conversation with development agents (per 2026-05-30 clarification).
+
+**8 Denominators Mapping (Primary):**
+- #1 Fluctuation Dynamics — brain signals are the highest-velocity input the system will ever handle.
+- #2 Budget — EM energy, compute, and cognitive load are all first-class budgeted resources with NeuroBalance veto.
+- #4 Controlled Oscillation + #5 Adaptation Offset — the Roller Coaster and NeuroBalance explicitly schedule safe engagement vs. recovery cycles for the link itself.
+- #6/#7/#8 — full traceability, provenance, and drift detection on every generated command.
+
+**Next Immediate Work:** Detailed signal chain mathematics, calibration protocol, and a minimal v1.0 receive-only prototype definition (hardware power envelope + deterministic fixed-point pipeline + NeuroBalance integration). All future development of this layer must be logged via the Kimi Execution Log system when autonomous agents are involved.
+
+**End of 2026-05-30 NINL Triad Establishment Entry**

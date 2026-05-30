@@ -287,6 +287,9 @@ The NeuroDiOS architecture and documentation layer exhibit exceptional self-cons
 
 **Hard Scope Boundary (2026-05-30 user clarification):** The entire Kimi Execution Log system (deltas, log, watchers, recursive tasks) watches and records **Kimi autonomous updates and the five agents only**. It actively observes and logs nothing about the human user or any human conversation, queries, or instructions. This boundary is absolute.
 
+**2026-05-30 Major New Subsystem Activated:** NeuroDiOS Non-Invasive Neural Link (NINL)
+Full triad (NEURODIOS-NINL-REQ/DES/TEC-001) now exists in both roots. This is the hardware layer that finally delivers the "Neural Link" in the project name — non-invasive electromagnetic wave resonance (or equivalent) to read brain signals and turn them into commands/prompts. The link is placed under absolute NeuroBalance + Roller Coaster governance from the first line of code. All NINL development (especially by autonomous agents) must be logged via KDBs. The historical internal shared-memory "nnos_neural_link" becomes the software egress target for hardware-derived neural tokens.
+
 **End of §8**
 
 ---
