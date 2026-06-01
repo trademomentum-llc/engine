@@ -1,8 +1,8 @@
-# NNOS — Neurodivergent Neural-Link Operating System
+# NeuroDiOS — NeuroDivergent Operating System
 
 **Deterministic, physiology-aware daemon constellation for neurodivergent operators.**
 
-NNOS is a compiled C++ daemon suite that monitors physiological state, enforces task and context-switch budgets, detects burnout risk and social masking, and synchronizes encrypted state across heterogeneous nodes (NUC / Apple Silicon / Jetson Orin).
+NeuroDiOS is a compiled C++ daemon suite that monitors physiological state, enforces task and context-switch budgets, detects burnout risk and social masking, and synchronizes encrypted state across heterogeneous nodes (NUC / Apple Silicon / Jetson Orin).
 
 All runtime code is compiled. No interpreted Python or shell scripts are loaded in the critical path.
 
@@ -12,25 +12,25 @@ All runtime code is compiled. No interpreted Python or shell scripts are loaded 
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Node Topologies                           │
+│                    Node Topologies                          │
 ├─────────────────┬─────────────────┬─────────────────────────┤
-│   DCN (NUC)     │   HCN (M1 Mac)  │   EPN (Jetson Orin)    │
+│   DCN (NUC)     │   HCN (M1 Mac)  │   EPN (Jetson Orin)     │
 │                 │                 │                         │
-│  lsa_boot_dcn   │  lsa_boot_hcn   │  lsa_boot_epn          │
-│  ├─ task_mgr    │  ├─ comm_bridge │  ├─ state_monitor      │
-│  ├─ context_gate│  ├─ profile_ref │  └─ ethernet_sync      │
+│  lsa_boot_dcn   │  lsa_boot_hcn   │  lsa_boot_epn           │
+│  ├─ task_mgr    │  ├─ comm_bridge │  ├─ state_monitor       │
+│  ├─ context_gate│  ├─ profile_ref │  └─ ethernet_sync       │
 │  └─ integrity   │  └─ convergence │                         │
 │                 │                 │                         │
-│  threat_intel   │  (global daemons│  drift_detector         │
-│  morph_maintainer│  run on all)   │                         │
+│ threat_intel    │ (global daemons │  drift_detector         │
+│ morph_maintainer│  run on all)    │                         │
 └─────────────────┴─────────────────┴─────────────────────────┘
                               │
                     UDP multicast 239.73.78.69:20046
                     AES-256-GCM + BLAKE3-32 MAC
                               │
                     ┌─────────────────────────┐
-                    │   Shared-State TLV Log   │
-                    │   (append-only, committed)│
+                    │  Shared-State TLV Log   │
+                    │ (append-only, committed)│
                     └─────────────────────────┘
 ```
 
