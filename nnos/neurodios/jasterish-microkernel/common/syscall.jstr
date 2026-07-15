@@ -857,16 +857,6 @@ function sys_list:
 
 
 # ---------------------------------------------------------------------------
-# syscall_init — Register the system call handler
-#
-# Installs the arch-specific syscall entry stub as the handler for
-# interrupt 0x80 (x86-64) or the EL1 sync exception (AArch64).  The
-# arch stub then calls syscall_dispatch with the syscall number and
-# an argument array.
-#
-# Called once during kernel initialization.
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
 # sys_exec — Execute a program from the filesystem
 #
 # path: pointer to null-terminated filename in user space

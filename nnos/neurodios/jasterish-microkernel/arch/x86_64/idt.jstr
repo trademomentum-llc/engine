@@ -767,8 +767,10 @@ syscall_entry_point
     store tmp into args at 5
 
     call syscall_dispatch num args
-    store it into register rax
-    return 0
+    a result
+    store it into result
+    store result into register rax
+    return result
 
 ###############################################################################
 # Section 7: IDT Utility Functions
