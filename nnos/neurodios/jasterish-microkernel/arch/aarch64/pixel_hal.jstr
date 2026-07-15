@@ -1,0 +1,167 @@
+# ============================================================================
+# pixel_hal.jstr -- Pixel/Tensor G4 HAL driver registry and stubs
+# ============================================================================
+# Device-tree driven driver registration table and Pixel/Tensor G4 specific
+# init stubs. This file is kept separate from the generic AArch64 HAL so that
+# board-specific code can evolve without coupling to QEMU 'virt' bring-up.
+#
+# Public interface:
+#   hal_register_qemu_drivers()  -- register the QEMU 'virt' drivers
+#   hal_register_pixel_stubs()   -- register Pixel/Tensor G4 stubs
+#   hal_init_from_fdt()          -- initialize drivers found in the DTB
+#
+# Built-ins assumed from the AArch64 JStar backend:
+#   read8(addr), write8(addr, value), label_addr(func)
+# ============================================================================
+
+# ============================================================================
+# HAL driver registration table (Task 20)
+# ============================================================================
+# Simple driver registry indexed by compatible string. Each entry stores a
+# NUL-terminated compatible string and the address of its init function.
+#
+# Note: The AArch64 JStar backend does not yet support indirect function
+# calls, so hal_init_from_fdt() dispatches via the hardcoded hal_dispatch()
+# switch below. The table still records the function addresses so the design
+# remains intact once the backend grows indirect-call support.
+
+# ----------------------------------------------------------------------------
+# Table configuration
+# ----------------------------------------------------------------------------
+global HAL_MAX_DRIVERS
+store 16 into HAL_MAX_DRIVERS
+
+global HAL_COMPAT_LEN
+store 64 into HAL_COMPAT_LEN
+
+global g_driver_count
+store 0 into g_driver_count
+
+global g_driver_compat
+array 1024 g_driver_compat   # 16 entries * 64 bytes per compatible string
+
+global g_driver_init
+array 16 g_driver_init       # 16 function addresses
+
+# ----------------------------------------------------------------------------
+# Copy a NUL-terminated compatible string into the table slot.
+# ----------------------------------------------------------------------------
+func hal_copy_compat(slot: u32, compatible: u64) {
+    let dst: u64 = g_driver_compat + (slot * HAL_COMPAT_LEN)
+    let src: u64 = compatible
+    let i: u64 = 0
+    while i < HAL_COMPAT_LEN {
+        let ch: u8 = read8(src + i)
+        write8(dst + i, ch)
+        if ch == 0 {
+            return
+        }
+        i = i + 1
+    }
+    return
+}
+
+# ----------------------------------------------------------------------------
+# Register a driver. compatible is a pointer to a NUL-terminated string;
+# init is a function address obtained with label_addr().
+# ----------------------------------------------------------------------------
+func hal_register_driver(compatible: u64, init: u64) {
+    let idx: u32 = g_driver_count
+    if idx >= HAL_MAX_DRIVERS {
+        return
+    }
+    call hal_copy_compat idx compatible
+    store init into g_driver_init at idx
+    g_driver_count = g_driver_count + 1
+    return
+}
+
+# ----------------------------------------------------------------------------
+# Hardcoded dispatch helper. Index order must match the order in which
+# drivers are registered by hal_register_qemu_drivers() and
+# hal_register_pixel_stubs().
+# ----------------------------------------------------------------------------
+func hal_dispatch(idx: u32, node: u64) -> u32 {
+    if idx == 0 {
+        return pl011_init(node)
+    }
+    if idx == 1 {
+        return gicv2_init(node)
+    }
+    if idx == 2 {
+        return gicv3_stub_init(node)
+    }
+    if idx == 3 {
+        return ufs_stub_init(node)
+    }
+    if idx == 4 {
+        return pmic_stub_init(node)
+    }
+    return 1
+}
+
+# ----------------------------------------------------------------------------
+# Walk the registered drivers and, for each one that has a matching node in
+# the DTB, invoke its init function.
+# ----------------------------------------------------------------------------
+func hal_init_from_fdt() {
+    let i: u32 = 0
+    while i < g_driver_count {
+        let compat: u64 = g_driver_compat + (i * HAL_COMPAT_LEN)
+        let node: u64 = fdt_find_node(compat)
+        if node != 0 {
+            call hal_dispatch i node
+        }
+        i = i + 1
+    }
+    return
+}
+
+# ----------------------------------------------------------------------------
+# Register the QEMU 'virt' drivers.
+# ----------------------------------------------------------------------------
+func hal_register_qemu_drivers() {
+    let pl011_addr: u64 = label_addr(pl011_init)
+    let gicv2_addr: u64 = label_addr(gicv2_init)
+    call hal_register_driver "arm,pl011" pl011_addr
+    call hal_register_driver "arm,cortex-a15-gic" gicv2_addr
+    return
+}
+
+# ----------------------------------------------------------------------------
+# Register Pixel/Tensor G4 HAL stubs.
+# ----------------------------------------------------------------------------
+func hal_register_pixel_stubs() {
+    let gicv3_addr: u64 = label_addr(gicv3_stub_init)
+    let ufs_addr: u64 = label_addr(ufs_stub_init)
+    let pmic_addr: u64 = label_addr(pmic_stub_init)
+    call hal_register_driver "arm,gic-v3" gicv3_addr
+    call hal_register_driver "jedec,ufs-2.1" ufs_addr
+    call hal_register_driver "google,tensor-g4-pmic" pmic_addr
+    return
+}
+
+# ----------------------------------------------------------------------------
+# Pixel/Tensor G4 device stubs.
+# These decode 'reg' from the node but take no real hardware action.
+# ----------------------------------------------------------------------------
+func gicv3_stub_init(node: u64) -> u32 {
+    let dist_addr: u64 = 0
+    let dist_size: u64 = 0
+    let redist_addr: u64 = 0
+    let redist_size: u64 = 0
+    call fdt_get_reg node 0 dist_addr dist_size
+    call fdt_get_reg node 1 redist_addr redist_size
+    return 0
+}
+
+func ufs_stub_init(node: u64) -> u32 {
+    let hci_addr: u64 = 0
+    let hci_size: u64 = 0
+    call fdt_get_reg node 0 hci_addr hci_size
+    return 0
+}
+
+func pmic_stub_init(node: u64) -> u32 {
+    return 0
+}
