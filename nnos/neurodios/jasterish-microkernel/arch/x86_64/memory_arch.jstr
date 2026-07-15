@@ -1,5 +1,5 @@
 # ============================================================================
-# memory.jstr -- Memory Management Module for the Jasterish Micro-Kernel
+# memory_arch.jstr -- Memory Management Module for the Jasterish Micro-Kernel
 # ============================================================================
 # This module provides three core memory management subsystems for a bare-metal
 # x86-64 micro-kernel:
@@ -1840,7 +1840,7 @@ function memmove
 end
 
 # ============================================================================
-# End of memory.jstr -- Memory Management Module for Jasterish Micro-Kernel
+# End of memory_arch.jstr -- Memory Management Module for Jasterish Micro-Kernel
 # ============================================================================
 # Module Summary:
 #   - PMM: Bitmap-based physical page frame allocator

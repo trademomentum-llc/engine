@@ -18,12 +18,12 @@
  *   0x05000000 - 0x05FFFFFF : Kernel heap
  *
  * The kernel runs in the higher half (above 0xFFFFFFFF80000000) after
- * paging is enabled by the VMM initialization in memory.jstr.
+ * paging is enabled by the VMM initialization in arch/x86_64/memory_arch.jstr.
  * The identity mapping in the boot page tables bridges the gap between
  * the physical load address and the higher-half virtual address.
  *
  * OUTPUT FORMAT: ELF64-x86-64
- * ENTRY POINT: _start (defined in boot.jstr)
+ * ENTRY POINT: _start (defined in arch/x86_64/boot.jstr)
  * ============================================================================
  */
 
@@ -33,7 +33,7 @@ OUTPUT_FORMAT(elf64-x86-64)
 /* Target architecture */
 OUTPUT_ARCH(i386:x86-64)
 
-/* Entry point symbol -- must match the label in boot.jstr */
+/* Entry point symbol -- must match the label in arch/x86_64/boot.jstr */
 ENTRY(_start)
 
 /* ============================================================================
@@ -93,13 +93,13 @@ SECTIONS
      * Text Section (Code)
      * ------------------------------------------------------------------------
      * Contains all executable code from all modules:
-     *   - boot.jstr: _start, serial_putc, serial_puts, gdt_init, panic, etc.
-     *   - memory.jstr: pmm_init, pmm_alloc, vmm_init, kmalloc, etc.
-     *   - process.jstr: scheduler_init, schedule, context_switch, etc.
-     *   - ipc.jstr: ipc_send, ipc_receive, ipc_notify, etc.
-     *   - syscall.jstr: syscall_handler, sys_exit, sys_fork, etc.
-     *   - drivers.jstr: pic_init, pit_init, keyboard_handler, etc.
-     *   - kernel.jstr: kernel_main, scheduler_loop, init_function, etc.
+     *   - arch/x86_64/boot.jstr: _start, serial_putc, serial_puts, gdt_init, panic, etc.
+     *   - arch/x86_64/memory_arch.jstr: pmm_init, pmm_alloc, vmm_init, kmalloc, etc.
+     *   - common/process.jstr: scheduler_init, schedule, context_switch, etc.
+     *   - common/ipc.jstr: ipc_send, ipc_receive, ipc_notify, etc.
+     *   - common/syscall.jstr: syscall_handler, sys_exit, sys_fork, etc.
+     *   - arch/x86_64/drivers.jstr: pic_init, pit_init, keyboard_handler, etc.
+     *   - common/kernel.jstr: kernel_main, scheduler_loop, init_function, etc.
      */
     . = 0x00101000;
 
