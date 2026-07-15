@@ -1839,6 +1839,109 @@ function memmove
     end
 end
 
+# ----------------------------------------------------------------------------
+# Architecture-specific context-switch and MMU HAL helpers.
+# These are consumed by the arch-independent scheduler in common/process.jstr.
+# ----------------------------------------------------------------------------
+
+# ----------------------------------------------------------------------------
+# Function: arch_save_context
+# Parameters: pcb -- process slot index
+# Description:
+#   Save the kernel execution context of the currently running process.
+#   The full general-purpose register set is assumed to have been saved by
+#   the assembly interrupt stub; here we capture the stack pointer and the
+#   return address (RIP) so the process can be resumed later.
+# ----------------------------------------------------------------------------
+function arch_save_context
+    a pcb
+    a tmp
+
+    store argument 0 into pcb
+
+    # Save the current stack pointer.
+    inline "mov rax, rsp"
+    store register rax into tmp
+    store tmp into proc_rsp at pcb
+
+    # Save the return address at the top of the stack as the resume RIP.
+    inline "mov rax, [rsp]"
+    store register rax into tmp
+    store tmp into proc_rip at pcb
+
+    return 0
+end
+
+# ----------------------------------------------------------------------------
+# Function: arch_restore_context
+# Parameters: pcb -- process slot index
+# Description:
+#   Restore the execution context of the selected process and resume it.
+#   For user-mode processes (proc_user_rip[pcb] != 0), this builds an iretq
+#   frame and enters ring 3.  For kernel-mode processes, it restores RSP and
+#   returns to the saved return address on the stack.
+# ----------------------------------------------------------------------------
+function arch_restore_context
+    a pcb
+    a user_rip
+    a tmp
+
+    store argument 0 into pcb
+
+    # Determine whether this is a user-mode process.
+    load proc_user_rip at pcb
+    store it into user_rip
+
+    load user_rip
+    load 0
+    if not equal it it
+        # User-mode entry via iretq.
+        a user_rsp
+        load proc_user_rsp at pcb
+        store it into user_rsp
+
+        store user_rsp into tmp
+        store tmp into register rax
+        inline "push rax"
+        inline "push 0x202"
+        inline "push 0x1B"
+        store user_rip into tmp
+        store tmp into register rax
+        inline "push rax"
+        inline "iretq"
+
+        # Unreachable.
+        return 0
+    end
+
+    # Kernel-mode entry: restore the stack pointer and return to the saved
+    # return address that arch_save_context stored on the process's stack.
+    load proc_rsp at pcb
+    store it into tmp
+    store tmp into register rax
+    inline "mov rsp, rax"
+    inline "ret"
+
+    # Unreachable.
+    return 0
+end
+
+# ----------------------------------------------------------------------------
+# Function: arch_mmu_switch
+# Parameters: page_table -- physical address of the top-level page table
+# Description:
+#   Switch the current address space by loading the given page table root
+#   into CR3.  This flushes the TLB and activates the new translation tree.
+# ----------------------------------------------------------------------------
+function arch_mmu_switch
+    a page_table
+
+    store argument 0 into page_table
+    asm "mov cr3, %0" with page_table
+
+    return 0
+end
+
 # ============================================================================
 # End of memory_arch.jstr -- Memory Management Module for Jasterish Micro-Kernel
 # ============================================================================
@@ -1852,4 +1955,5 @@ end
 #     * heap_init, kmalloc, kfree
 #   - Utilities: Low-level memory primitives
 #     * memset, memcpy, memmove
+#   - HAL: arch_save_context, arch_restore_context, arch_mmu_switch
 # ============================================================================

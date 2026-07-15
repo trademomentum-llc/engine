@@ -250,3 +250,53 @@ func arch_mmu_switch(page_table: u64) {
     isb()
     return
 }
+
+# ----------------------------------------------------------------------------
+# Context-switch HAL helpers.
+# These operate on the PCB arrays defined by the arch-independent scheduler
+# (common/process.jstr): proc_rsp, proc_rip, proc_user_rip, proc_user_rsp.
+# ----------------------------------------------------------------------------
+func arch_save_context(pcb: u64) {
+    # Save the kernel stack pointer and link register for this slot.
+    let sp_tmp: u64 = sp
+    store sp_tmp into proc_rsp at pcb
+    let lr_tmp: u64 = x30
+    store lr_tmp into proc_rip at pcb
+    return
+}
+
+func arch_restore_context(pcb: u64) {
+    let user_rip: u64 = 0
+    let user_rsp: u64 = 0
+    let sp_tmp: u64 = 0
+    let lr_tmp: u64 = 0
+
+    # Determine whether this is a user-mode process.
+    load proc_user_rip at pcb
+    store it into user_rip
+
+    load user_rip
+    load 0
+    if not equal it it {
+        # User-mode entry via eret.
+        load proc_user_rsp at pcb
+        store it into user_rsp
+
+        asm "msr sp_el0, %0" with user_rsp
+        msr(ELR_EL1, user_rip)
+        msr(SPSR_EL1, 0x3C0)
+        eret
+        return
+    }
+
+    # Kernel-mode entry: restore SP and LR, then return.
+    load proc_rsp at pcb
+    store it into sp_tmp
+    asm "mov sp, %0" with sp_tmp
+    load proc_rip at pcb
+    store it into lr_tmp
+    asm "mov x30, %0" with lr_tmp
+    inline "ret"
+
+    return
+}

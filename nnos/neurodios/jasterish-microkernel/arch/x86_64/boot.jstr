@@ -948,6 +948,41 @@ _panic_halt_loop
     return 0
 
 ###############################################################################
+# Architecture-neutral HAL wrappers for common kernel code.
+# These forward to the x86-64-specific implementations defined above or in
+# the IDT module.
+###############################################################################
+
+arch_putc
+    a c
+    store it into c
+    call serial_putc c
+    return 0
+
+arch_getc
+    call keyboard_getc
+    return it
+
+arch_panic
+    a msg
+    store it into msg
+    call panic msg
+    return 0
+
+arch_irq_enable
+    call idt_enable_interrupts
+    return 0
+
+arch_irq_disable
+    call idt_disable_interrupts
+    return 0
+
+arch_halt
+    inline "sti"
+    inline "hlt"
+    return 0
+
+###############################################################################
 # End of boot.jstr
 ###############################################################################
 # This module provides the foundational infrastructure for the Jasterish

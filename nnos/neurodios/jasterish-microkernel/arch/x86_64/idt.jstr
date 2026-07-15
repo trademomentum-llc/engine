@@ -743,15 +743,31 @@ irq_dispatch
 ###############################################################################
 
 syscall_entry_point
-    # In real implementation:
-    #   swapgs (if using GS base for per-CPU data)
-    #   push all registers
-    #   call syscall_handler
-    #   pop all registers
-    #   iretq
+    # Architecture-specific stub for int 0x80.  Build an argument array
+    # from the user register frame and dispatch through the common
+    # syscall handler.  The result is returned in RAX.
+    a num
+    a args
+    a tmp
+    array 6 args
 
-    # For Jasterish, we delegate to the high-level handler
-    call syscall_handler
+    store register rax into num
+
+    store register rdi into tmp
+    store tmp into args at 0
+    store register rsi into tmp
+    store tmp into args at 1
+    store register rdx into tmp
+    store tmp into args at 2
+    store register r10 into tmp
+    store tmp into args at 3
+    store register r8 into tmp
+    store tmp into args at 4
+    store register r9 into tmp
+    store tmp into args at 5
+
+    call syscall_dispatch num args
+    store it into register rax
     return 0
 
 ###############################################################################

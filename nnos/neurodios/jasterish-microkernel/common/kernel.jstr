@@ -36,7 +36,7 @@ global kernel_build_date
 store "2026-05-28" into kernel_build_date
 
 global kernel_arch
-store "x86-64" into kernel_arch
+store "portable" into kernel_arch
 
 # =============================================================================
 # Section 2: Kernel Main Function
@@ -74,7 +74,8 @@ kernel_main
     print "============================================================"
     print "  JMK -- Jasterish Micro-Kernel"
     print "  Version 1.0"
-    print "  Architecture: x86-64"
+    print "  Architecture: "
+    print kernel_arch
     print "  Build Date: 2026-05-28"
     print "============================================================"
     print ""
@@ -187,7 +188,7 @@ kernel_main
 
     if compare init_pid -1
         print "[kernel] FATAL: Failed to create init process!"
-        call panic "init process creation failed"
+        call arch_panic "init process creation failed"
     end
 
     print "[kernel] Init process created with PID:"
@@ -206,15 +207,15 @@ kernel_main
     print "============================================================"
     print ""
 
-    # Enable interrupts (STI instruction)
-    inline "sti"
+    # Enable interrupts via the architecture-neutral HAL.
+    call arch_irq_enable
 
     # Enter the scheduler -- this function never returns.
     # It loops forever, selecting and running processes.
     call scheduler_loop
 
     # Safety: if scheduler_loop somehow returns, panic.
-    call panic "scheduler_loop returned unexpectedly"
+    call arch_panic "scheduler_loop returned unexpectedly"
 
     return 0
 
@@ -295,11 +296,11 @@ ready_queue_not_empty
 ###############################################################################
 
 cpu_idle_step
-    # Enable interrupts so the next timer/keyboard interrupt wakes us
-    inline "sti"
+    # Enable interrupts so the next timer/keyboard interrupt wakes us.
+    call arch_irq_enable
 
-    # Halt until an interrupt occurs (HLT instruction)
-    inline "hlt"
+    # Halt until the next interrupt arrives (architecture-specific WFI/HLT).
+    call arch_halt
 
     return 0
 
@@ -484,18 +485,18 @@ shell_loop
     store 0 into cmd_len
 
 shell_read_loop
-    # Read a character from the keyboard (non-blocking)
-    call keyboard_getc
+    # Read a character from the console (non-blocking, arch-neutral).
+    call arch_getc
     store it into a ch
 
-    # If no character available, yield and try again
-    if equal ch 0
+    # If no character available (0 or -1), yield and try again.
+    if less_or_equal ch 0
         call yield
         jump shell_read_loop
     end
 
     # Echo the character
-    call serial_putc ch
+    call arch_putc ch
 
     # Check for Enter key (newline)
     if equal ch 10
@@ -519,9 +520,9 @@ shell_read_loop
             subtract cmd_len 1
             store it into cmd_len
             # Echo backspace-space-backspace to erase
-            call serial_putc 8
-            call serial_putc 32
-            call serial_putc 8
+            call arch_putc 8
+            call arch_putc 32
+            call arch_putc 8
         end
         jump shell_read_loop
     end
@@ -824,7 +825,7 @@ cmd_echo
         a ch
         load cmd_buf at idx
         store it into ch
-        call serial_putc ch
+        call arch_putc ch
         add idx 1
         store it into idx
     end
@@ -911,7 +912,7 @@ cmd_cat
         while less idx bytes_read
             load read_buf at idx
             store it into ch
-            call serial_putc ch
+            call arch_putc ch
             add idx 1
             store it into idx
         end

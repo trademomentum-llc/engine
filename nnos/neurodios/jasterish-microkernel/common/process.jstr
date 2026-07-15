@@ -976,26 +976,10 @@ end
 # ---------------------------------------------------------------------------
 # switch_to(next_slot) - Perform the actual context switch between processes
 #
-# This is the lowest-level scheduler function. It saves the complete
-# register context of the currently running process and restores the
-# context of the next process. In x86-64 terms, this involves:
-#
-#   Save side (current process):
-#     - Save RSP (stack pointer) to proc_rsp[current]
-#     - Save RIP (instruction pointer) to proc_rip[current]
-#     - Save CR3 (page table root) if implementing full context
-#
-#   Restore side (next process):
-#     - Update current_process = next_slot
-#     - Set proc_state[next_slot] = PROC_RUNNING
-#     - Load CR3 with proc_cr3[next_slot] (if different from current)
-#     - Load RSP from proc_rsp[next_slot]
-#     - Jump to proc_rip[next_slot] (via ret or iret)
-#
-# In Jasterish, we model this with store/load operations on the PCB arrays.
-# The actual x86-64 assembly would be inline or in a separate asm block.
-# The CR3 (page table) switch only happens if the two processes have
-# different address spaces (different CR3 values).
+# This is the lowest-level scheduler function.  It delegates the arch-specific
+# register save/restore to arch_save_context()/arch_restore_context() and uses
+# arch_mmu_switch() to change address spaces.  All x86-64/x86-64-specific
+# register and IRETQ details have been moved into the architecture HAL.
 #
 # Arguments: next_slot - the process slot index to switch to
 # Returns: technically does not return; execution resumes in next process
@@ -1005,8 +989,6 @@ function switch_to
     a curr_slot
     a curr_cr3
     a next_cr3
-    a user_rip_val
-    a user_rsp_val
 
     # Get the target process slot
     store argument 0 into next_slot
@@ -1018,17 +1000,7 @@ function switch_to
     # ------------------------------------------------------------------
     # Save phase: store current process context into its PCB
     # ------------------------------------------------------------------
-
-    # Save current RSP to proc_rsp[curr_slot]
-    # In real asm: mov [proc_rsp + curr_slot*8], rsp
-    # proc_rsp already maintained; here we ensure consistency
-    load proc_rsp at curr_slot
-    store it into proc_rsp at curr_slot
-
-    # Save current RIP to proc_rip[curr_slot]
-    # In real asm: mov [proc_rip + curr_slot*8], rip (via call stack)
-    load proc_rip at curr_slot
-    store it into proc_rip at curr_slot
+    call arch_save_context curr_slot
 
     # ------------------------------------------------------------------
     # Switch phase: update scheduler bookkeeping
@@ -1042,57 +1014,27 @@ function switch_to
     store it into proc_state at next_slot
 
     # ------------------------------------------------------------------
-    # Restore phase: load next process context from its PCB
+    # Address-space switch (if the two processes have different page tables)
     # ------------------------------------------------------------------
-
-    # Check if we need to switch page tables (CR3)
-    # Load current and next CR3 values
     load proc_cr3 at curr_slot
     store it into curr_cr3
     load proc_cr3 at next_slot
     store it into next_cr3
 
-    # If CR3 values differ, perform a page table switch
     load curr_cr3
     load next_cr3
     if not equal it it
-        # In real asm: mov cr3, next_cr3
-        # This flushes the TLB and switches to the new address space.
-        # Jasterish models this as a store to the CR3 register concept.
-        load next_cr3
-        store it into kernel_pml4
+        call arch_mmu_switch next_cr3
     end
 
-    # Check if the target process is a user process (non-zero user RIP)
-    load proc_user_rip at next_slot
-    store it into user_rip_val
-    load user_rip_val
-    load 0
-    if not equal it it
-        # User process - enter ring 3 via iretq
-        load proc_user_rsp at next_slot
-        store it into user_rsp_val
-        call enter_user_mode user_rsp_val user_rip_val
-        # enter_user_mode does not return
-    end
+    # ------------------------------------------------------------------
+    # Restore phase: load next process context from its PCB
+    # This does not return for the previously-running process; it returns
+    # inside the next process when that process is eventually scheduled.
+    # ------------------------------------------------------------------
+    call arch_restore_context next_slot
 
-    # Kernel process - normal register restore
-    # Restore RSP from proc_rsp[next_slot]
-    # In real asm: mov rsp, [proc_rsp + next_slot*8]
-    load proc_rsp at next_slot
-    store it into it
-
-    # Restore RIP from proc_rip[next_slot]
-    # In real asm: jmp [proc_rip + next_slot*8]
-    # or: mov rax, [proc_rip + next_slot*8]; jmp rax
-    load proc_rip at next_slot
-    store it into it
-
-    # The context switch is now complete. The CPU is executing in the
-    # context of the next process. When this process is switched away
-    # from and later switched back to, execution resumes here with
-    # all registers restored to their values at the time of the switch.
-
+    # Unreachable: arch_restore_context resumes execution elsewhere.
     return 0
 end
 
@@ -1543,61 +1485,10 @@ function process_fork_cow
 end
 
 # ---------------------------------------------------------------------------
-# enter_user_mode(user_rsp, user_rip) - Enter ring 3 via iretq
-#
-# Constructs an interrupt stack frame and uses iretq to transition
-# from kernel mode (ring 0) to user mode (ring 3).
-#
-# Stack frame layout:
-#   SS  = 0x23 (user data selector, RPL=3)
-#   RSP = user stack pointer
-#   RFLAGS = 0x202 (interrupt enable)
-#   CS  = 0x1B (user code selector, RPL=3)
-#   RIP = user entry point
-#
-# Arguments:
-#   user_rsp - user stack pointer
-#   user_rip - user instruction pointer
-# ---------------------------------------------------------------------------
-function enter_user_mode
-    a user_rsp
-    a user_rip
-    a tmp_val
-
-    store argument 0 into user_rsp
-    store argument 1 into user_rip
-
-    # Push SS (user data selector = 0x20 | 3 = 0x23)
-    inline "push 0x23"
-
-    # Push RSP (user stack pointer)
-    store user_rsp into tmp_val
-    store tmp_val into register rax
-    inline "push rax"
-
-    # Push RFLAGS (0x202 = interrupt enable)
-    inline "push 0x202"
-
-    # Push CS (user code selector = 0x18 | 3 = 0x1B)
-    inline "push 0x1B"
-
-    # Push RIP (user entry point)
-    store user_rip into tmp_val
-    store tmp_val into register rax
-    inline "push rax"
-
-    # Issue iretq to perform the privilege transition
-    inline "iretq"
-
-    return 0
-end
-
-# ---------------------------------------------------------------------------
 # process_create_user(user_rip, user_rsp, priority, code_phys) - Create a ring-3 process
 #
-# Creates a new user-mode process with its own page table and sets up
-# the initial context for entry via enter_user_mode instead of a
-# simple kernel-mode register restore.
+# Creates a new user-mode process with its own page table.  The arch-specific
+# arch_restore_context() performs the actual transition to user mode.
 #
 # Arguments:
 #   user_rip   - user-mode entry point

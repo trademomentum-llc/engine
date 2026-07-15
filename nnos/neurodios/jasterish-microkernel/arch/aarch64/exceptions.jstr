@@ -20,6 +20,14 @@
 global VECTOR_TABLE_SIZE
 store 2048 into VECTOR_TABLE_SIZE
 
+# ----------------------------------------------------------------------------
+# Scratch argument array for the synchronous exception (SVC) dispatch path.
+# The AArch64 backend currently does not support local arrays, so a small
+# global array is used here.
+# ----------------------------------------------------------------------------
+global syscall_args
+array 6 syscall_args
+
 global VECTOR_ENTRY_SIZE
 store 128 into VECTOR_ENTRY_SIZE
 
@@ -104,6 +112,27 @@ func exceptions_init() {
 # primitives.  These handlers provide the required dispatch shape.
 # ----------------------------------------------------------------------------
 func sync_handler() {
+    let esr: u64 = mrs(ESR_EL1)
+    let ec: u64 = (esr >> 26) & 0x3F
+
+    if ec == 0x15 {
+        # SVC from AArch64: treat x8 as the syscall number and x0-x5
+        # as the argument list.
+        let num: u64 = x8
+
+        store x0 into syscall_args at 0
+        store x1 into syscall_args at 1
+        store x2 into syscall_args at 2
+        store x3 into syscall_args at 3
+        store x4 into syscall_args at 4
+        store x5 into syscall_args at 5
+
+        call syscall_dispatch num syscall_args
+        # The return value is left in the JStar implicit result register;
+        # the backend is responsible for mapping it to x0 on return to EL0.
+        return
+    }
+
     call arch_panic "synchronous exception"
     return
 }

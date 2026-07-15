@@ -5,7 +5,7 @@
 # This module provides the gateway between user-space processes and the
 # kernel.  User processes invoke system calls through the syscallN
 # wrapper functions, which trap into the kernel via interrupt 0x80.
-# The syscall_handler dispatches to the appropriate kernel function
+# The syscall_dispatch function dispatches to the appropriate kernel function
 # based on the syscall number in RAX.
 #
 # Syscall ABI:
@@ -39,13 +39,13 @@ global SYS_LIST      int   # 15 — list filesystem contents
 global SYS_EXEC      int   # 16 — execute a program
 
 # ---------------------------------------------------------------------------
-# syscall_numbers_init — Initialize the syscall number constants
+# numbers_init — Initialize the syscall number constants
 #
 # Called during early kernel boot to populate the global constants.
 # In a real implementation these would be assembler equates; here we
 # use globals for documentation and introspection.
 # ---------------------------------------------------------------------------
-function syscall_numbers_init:
+function numbers_init:
     store 0  into SYS_EXIT
     store 1  into SYS_FORK
     store 2  into SYS_YIELD
@@ -67,19 +67,23 @@ function syscall_numbers_init:
 
 
 # ---------------------------------------------------------------------------
-# syscall_handler — Central system call dispatcher
+# syscall_dispatch — Architecture-neutral system call dispatcher
 #
-# Entry point for all system calls from user space (via int 0x80).
-# Preserves all general-purpose registers, reads the syscall number
-# from RAX, reads up to three arguments from RDI/RSI/RDX, dispatches
-# to the appropriate sys_* implementation, stores the return value
-# back into RAX, restores registers, and returns from interrupt.
+# Entry point for all system calls from user space.  The arch-specific
+# exception stub builds an argument array from the user's registers and
+# calls this function with:
+#   num  - system call number
+#   args - pointer to an array of up to six arguments
+#
+# The dispatcher validates the number, calls the appropriate sys_*
+# implementation, and returns the result to the arch stub (which places
+# it in the user-visible return register, e.g. RAX/x0).
 #
 # This is the MOST CRITICAL function for system security — it is the
 # sole controlled entry point from unprivileged user code into the
 # kernel.  All arguments must be validated before use.
 # ---------------------------------------------------------------------------
-function syscall_handler:
+function syscall_dispatch:
     # -------------------------------------------------------------------
     # Save all general-purpose registers on the kernel stack so the
     # interrupted process context is fully preserved.
@@ -90,19 +94,34 @@ function syscall_handler:
     # -------------------------------------------------------------------
     # save_registers
 
-    # Read the syscall number from RAX (set by caller before int 0x80)
-    a syscall_num
-    # syscall_num = rax (read from saved context)
-    load syscall_num
-    store it into syscall_num
+    # Architecture-neutral argument unpacking.
+    a num
+    a args
+    a arg1
+    a arg2
+    a arg3
+    a arg4
+    a arg5
+    a arg6
 
-    # Read arguments from the calling convention registers
-    a arg1  # RDI
-    a arg2  # RSI
-    a arg3  # RDX
-    # arg1 = rdi; arg2 = rsi; arg3 = rdx
+    store argument 0 into num
+    store argument 1 into args
 
-    # Return value accumulator — stored back into RAX at the end
+    # Extract up to six arguments from the arch-provided array.
+    load args at 0
+    store it into arg1
+    load args at 1
+    store it into arg2
+    load args at 2
+    store it into arg3
+    load args at 3
+    store it into arg4
+    load args at 4
+    store it into arg5
+    load args at 5
+    store it into arg6
+
+    # Return value accumulator — returned to the arch stub.
     a retval
     store 0 into retval
 
@@ -112,104 +131,104 @@ function syscall_handler:
     # -------------------------------------------------------------------
 
     # SYS_EXIT — terminate current process with given exit code
-    if compare syscall_num SYS_EXIT:
+    if compare num SYS_EXIT:
         call sys_exit arg1
         # sys_exit never returns
         return
     end
 
     # SYS_FORK — create a child process as copy of current
-    if compare syscall_num SYS_FORK:
+    if compare num SYS_FORK:
         call sys_fork
         store it into retval
     end
 
     # SYS_YIELD — voluntarily give up the CPU
-    if compare syscall_num SYS_YIELD:
+    if compare num SYS_YIELD:
         call sys_yield
         store it into retval
     end
 
     # SYS_SEND — send an IPC message to another process
-    if compare syscall_num SYS_SEND:
+    if compare num SYS_SEND:
         call sys_send arg1 arg2 arg3
         store it into retval
     end
 
     # SYS_RECV — receive an IPC message (blocking)
-    if compare syscall_num SYS_RECV:
+    if compare num SYS_RECV:
         call sys_recv arg1 arg2
         store it into retval
     end
 
     # SYS_SLEEP — sleep for N timer ticks
-    if compare syscall_num SYS_SLEEP:
+    if compare num SYS_SLEEP:
         call sys_sleep arg1
         store it into retval
     end
 
     # SYS_GETPID — return current process ID
-    if compare syscall_num SYS_GETPID:
+    if compare num SYS_GETPID:
         call sys_getpid
         store it into retval
     end
 
     # SYS_PUTS — print a null-terminated string to serial
-    if compare syscall_num SYS_PUTS:
+    if compare num SYS_PUTS:
         call sys_puts arg1
         store it into retval
     end
 
     # SYS_BRK — adjust the program break (heap end address)
-    if compare syscall_num SYS_BRK:
+    if compare num SYS_BRK:
         call sys_brk arg1
         store it into retval
     end
 
     # SYS_KILL — terminate another process by PID
-    if compare syscall_num SYS_KILL:
+    if compare num SYS_KILL:
         call sys_kill arg1
         store it into retval
     end
 
     # SYS_GETTICKS — return the number of timer ticks since boot
-    if compare syscall_num SYS_GETTICKS:
+    if compare num SYS_GETTICKS:
         call sys_getticks
         store it into retval
     end
 
     # SYS_OPEN — open a file by name
-    if compare syscall_num SYS_OPEN:
+    if compare num SYS_OPEN:
         call sys_open arg1 arg2
         store it into retval
     end
 
     # SYS_READ — read from a file descriptor
-    if compare syscall_num SYS_READ:
+    if compare num SYS_READ:
         call sys_read arg1 arg2 arg3
         store it into retval
     end
 
     # SYS_WRITE — write to a file descriptor
-    if compare syscall_num SYS_WRITE:
+    if compare num SYS_WRITE:
         call sys_write arg1 arg2 arg3
         store it into retval
     end
 
     # SYS_CLOSE — close a file descriptor
-    if compare syscall_num SYS_CLOSE:
+    if compare num SYS_CLOSE:
         call sys_close arg1
         store it into retval
     end
 
     # SYS_LIST — list filesystem contents
-    if compare syscall_num SYS_LIST:
+    if compare num SYS_LIST:
         call sys_list
         store it into retval
     end
 
     # SYS_EXEC — execute a program
-    if compare syscall_num SYS_EXEC:
+    if compare num SYS_EXEC:
         call sys_exec arg1
         store it into retval
     end
@@ -218,23 +237,23 @@ function syscall_handler:
     # Return -1 to indicate ENOSYS (function not implemented).
     a checked
     store 0 into checked
-    if compare syscall_num 0:  add checked 1; store it into checked; end
-    if compare syscall_num 1:  add checked 1; store it into checked; end
-    if compare syscall_num 2:  add checked 1; store it into checked; end
-    if compare syscall_num 3:  add checked 1; store it into checked; end
-    if compare syscall_num 4:  add checked 1; store it into checked; end
-    if compare syscall_num 5:  add checked 1; store it into checked; end
-    if compare syscall_num 6:  add checked 1; store it into checked; end
-    if compare syscall_num 7:  add checked 1; store it into checked; end
-    if compare syscall_num 8:  add checked 1; store it into checked; end
-    if compare syscall_num 9:  add checked 1; store it into checked; end
-    if compare syscall_num 10: add checked 1; store it into checked; end
-    if compare syscall_num 11: add checked 1; store it into checked; end
-    if compare syscall_num 12: add checked 1; store it into checked; end
-    if compare syscall_num 13: add checked 1; store it into checked; end
-    if compare syscall_num 14: add checked 1; store it into checked; end
-    if compare syscall_num 15: add checked 1; store it into checked; end
-    if compare syscall_num 16: add checked 1; store it into checked; end
+    if compare num 0:  add checked 1; store it into checked; end
+    if compare num 1:  add checked 1; store it into checked; end
+    if compare num 2:  add checked 1; store it into checked; end
+    if compare num 3:  add checked 1; store it into checked; end
+    if compare num 4:  add checked 1; store it into checked; end
+    if compare num 5:  add checked 1; store it into checked; end
+    if compare num 6:  add checked 1; store it into checked; end
+    if compare num 7:  add checked 1; store it into checked; end
+    if compare num 8:  add checked 1; store it into checked; end
+    if compare num 9:  add checked 1; store it into checked; end
+    if compare num 10: add checked 1; store it into checked; end
+    if compare num 11: add checked 1; store it into checked; end
+    if compare num 12: add checked 1; store it into checked; end
+    if compare num 13: add checked 1; store it into checked; end
+    if compare num 14: add checked 1; store it into checked; end
+    if compare num 15: add checked 1; store it into checked; end
+    if compare num 16: add checked 1; store it into checked; end
 
     if compare checked 0:
         # No valid syscall matched — return error
@@ -242,13 +261,9 @@ function syscall_handler:
         print "SYSCALL: unknown syscall number"
     end
 
-    # -------------------------------------------------------------------
-    # Store return value into RAX (in the saved register frame),
-    # restore all general-purpose registers, and return from interrupt.
-    # -------------------------------------------------------------------
-    # rax = retval
-    # restore_registers
-    # iretq
+    # Return the result to the arch-specific entry stub, which will
+    # place it in the user-visible return register (RAX on x86-64, x0
+    # on AArch64) and return to user mode.
 
     return retval
 
@@ -339,7 +354,7 @@ function syscall3:
 # =============================================================================
 # Individual System Call Implementations
 #
-# Each sys_* function is called by syscall_handler with arguments
+# Each sys_* function is called by syscall_dispatch with arguments
 # already extracted from the user register frame.  These run in
 # kernel mode with full privileges.  All user-provided pointers
 # must be validated before dereferencing.
@@ -844,9 +859,10 @@ function sys_list:
 # ---------------------------------------------------------------------------
 # syscall_init — Register the system call handler
 #
-# Installs syscall_handler as the handler for interrupt 0x80,
-# the traditional Linux int 0x80 syscall mechanism.  Also sets
-# up the MSR_LSTAR register if using syscall/sysret (fast path).
+# Installs the arch-specific syscall entry stub as the handler for
+# interrupt 0x80 (x86-64) or the EL1 sync exception (AArch64).  The
+# arch stub then calls syscall_dispatch with the syscall number and
+# an argument array.
 #
 # Called once during kernel initialization.
 # ---------------------------------------------------------------------------
@@ -926,9 +942,10 @@ function sys_exec:
 # ---------------------------------------------------------------------------
 # syscall_init — Register the system call handler
 #
-# Installs syscall_handler as the handler for interrupt 0x80,
-# the traditional Linux int 0x80 syscall mechanism.  Also sets
-# up the MSR_LSTAR register if using syscall/sysret (fast path).
+# Installs the arch-specific syscall entry stub as the handler for
+# interrupt 0x80 (x86-64) or the EL1 sync exception (AArch64).  The
+# arch stub then calls syscall_dispatch with the syscall number and
+# an argument array.
 #
 # Called once during kernel initialization.
 # ---------------------------------------------------------------------------
@@ -944,6 +961,6 @@ function syscall_init:
     #   wrmsr(MSR_CSTAR,  0);
     #   wrmsr(MSR_SFMASK, RFLAGS_IF);
 
-    call syscall_numbers_init
+    call numbers_init
     print "SYSCALL: system call interface initialized (int 0x80)"
     return 0
