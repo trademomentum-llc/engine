@@ -83,7 +83,14 @@ ifeq ($(ARCH),aarch64)
                arch/aarch64/gic.jstr \
                arch/aarch64/timer.jstr \
                arch/aarch64/exceptions.jstr \
-               arch/aarch64/hal.jstr
+               arch/aarch64/hal.jstr \
+               common/elf.jstr \
+               common/process.jstr \
+               common/ipc.jstr \
+               common/syscall.jstr \
+               common/vfs.jstr \
+               common/disk.jstr \
+               common/kernel.jstr
   LINKER_SCRIPT := arch/aarch64/linker.ld
   QEMU := qemu-system-aarch64
   QEMU_MACHINE := virt
@@ -170,7 +177,9 @@ QEMU_KERNEL     := -kernel $(KERNEL_BIN)
 QEMU_ISO_BOOT   := -cdrom $(KERNEL_ISO) -boot d
 
 # Combined QEMU run flags
-QEMU_RUN_FLAGS  := $(QEMU_BASE) $(QEMU_DISPLAY) $(QEMU_KERNEL)
+# run: interactive (display enabled); test: headless capture
+QEMU_RUN_FLAGS  := $(QEMU_BASE) $(QEMU_KERNEL)
+QEMU_TEST_FLAGS := $(QEMU_BASE) $(QEMU_DISPLAY) $(QEMU_KERNEL)
 QEMU_DEBUG_FLAGS:= $(QEMU_BASE) $(QEMU_DISPLAY) $(QEMU_KERNEL) $(QEMU_DEBUG)
 QEMU_ISO_FLAGS  := $(QEMU_BASE) $(QEMU_DISPLAY) $(QEMU_ISO_BOOT)
 
@@ -290,7 +299,7 @@ test: build
 	@echo "========================================"
 	@echo "  Running JMK self-test in QEMU..."
 	@echo "========================================"
-	@$(QEMU) $(QEMU_RUN_FLAGS) | tee test_output.log || true
+	@$(QEMU) $(QEMU_TEST_FLAGS) | tee test_output.log || true
 	@echo ""
 	@echo "Test output saved to: test_output.log"
 

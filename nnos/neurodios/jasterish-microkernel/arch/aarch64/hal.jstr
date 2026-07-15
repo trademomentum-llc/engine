@@ -97,24 +97,5 @@ func arch_panic(msg: u64) {
 }
 
 # ----------------------------------------------------------------------------
-# Minimal scheduler stub.  A real scheduler belongs in the common kernel,
-# but the AArch64 timer handler needs a symbol to call.
-# ----------------------------------------------------------------------------
-func schedule() {
-    return
-}
-
-# ----------------------------------------------------------------------------
-# Common kernel main entry point.  After architecture setup, print a banner
-# and enter the idle loop.
-# ----------------------------------------------------------------------------
-func kernel_main() {
-    call arch_print_string "Jasterish Micro-Kernel AArch64 ready\n"
-    call arch_irq_enable
-
-    while true {
-        wfe
-    }
-
-    return
-}
+# (schedule() and kernel_main() are provided by common/process.jstr and
+# common/kernel.jstr respectively once the compiler can link the full kernel.)

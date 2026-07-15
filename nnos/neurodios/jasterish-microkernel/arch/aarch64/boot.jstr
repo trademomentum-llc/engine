@@ -47,8 +47,8 @@ el1_entry:
     # Jump to arch_init with DTB pointer.
     call arch_init dtb_phys
 
-    # Enter common kernel.
-    call kernel_main
+    # Enter common kernel (no multiboot pointer on AArch64).
+    call kernel_main 0
 
     # Halt if kernel_main returns.
 halt:
