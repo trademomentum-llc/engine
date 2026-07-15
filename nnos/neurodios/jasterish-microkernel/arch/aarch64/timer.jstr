@@ -1,0 +1,74 @@
+# ============================================================================
+# timer.jstr -- AArch64 ARM Generic Timer driver
+# ============================================================================
+# Provides the kernel tick source using the EL1 virtual timer on QEMU 'virt'.
+#
+# Public interface:
+#   arch_timer_init(freq)   -- configure the timer for 1000 Hz ticks
+#   arch_timer_ack()        -- reload timer value and clear the interrupt
+#   timer_irq_handler()     -- dispatch a timer IRQ to the scheduler
+#
+# Built-ins assumed from the AArch64 JStar backend:
+#   msr(sysreg, value), mrs(sysreg), write32(addr, value)
+#
+# The virtual timer PPI is hard-wired to GIC IRQ 27 on QEMU 'virt'.
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Timer constants
+# ----------------------------------------------------------------------------
+global TIMER_IRQ
+store 27 into TIMER_IRQ          # EL1 virtual timer PPI
+
+global TIMER_HZ
+store 1000 into TIMER_HZ         # 1 ms ticks
+
+global CNTV_CTL_ENABLE
+store 1 into CNTV_CTL_ENABLE     # ENABLE bit
+
+# ----------------------------------------------------------------------------
+# Configure the virtual timer for periodic ticks.
+# ----------------------------------------------------------------------------
+func arch_timer_init(freq: u64) {
+    let ticks_per_interrupt: u64 = freq / TIMER_HZ
+    if ticks_per_interrupt == 0 {
+        ticks_per_interrupt = 1
+    }
+
+    # Load the down-counter; writing TVAL also clears any pending interrupt.
+    msr(CNTV_TVAL_EL0, ticks_per_interrupt)
+
+    # Enable the virtual timer (ENABLE=1, IMASK=0).
+    msr(CNTV_CTL_EL0, CNTV_CTL_ENABLE)
+
+    # Unmask the timer interrupt at the GIC.
+    call gic_enable_irq TIMER_IRQ
+
+    return
+}
+
+# ----------------------------------------------------------------------------
+# Reload the timer to acknowledge the current interrupt.
+# ----------------------------------------------------------------------------
+func arch_timer_ack() {
+    let freq: u64 = mrs(CNTFRQ_EL0)
+    let ticks_per_interrupt: u64 = freq / TIMER_HZ
+    if ticks_per_interrupt == 0 {
+        ticks_per_interrupt = 1
+    }
+
+    # Reloading TVAL clears the pending virtual-timer interrupt.
+    msr(CNTV_TVAL_EL0, ticks_per_interrupt)
+    isb()
+
+    return
+}
+
+# ----------------------------------------------------------------------------
+# Top-level timer IRQ handler: drive the scheduler and re-arm the timer.
+# ----------------------------------------------------------------------------
+func timer_irq_handler() {
+    call schedule
+    call arch_timer_ack
+    return
+}

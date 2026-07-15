@@ -1,0 +1,252 @@
+# ============================================================================
+# memory_arch.jstr -- AArch64 MMU and page-table helpers
+# ============================================================================
+# Provides 4-level page-table management (4KB granule) for the Jasterish
+# Micro-Kernel AArch64 port.
+#
+# Public interface:
+#   arch_mmu_init()                     -- identity-map low 1GB, map kernel high
+#   arch_mmu_map(vaddr, paddr, flags)   -- insert a 4KB mapping
+#   arch_mmu_unmap(vaddr)               -- remove a 4KB mapping
+#   arch_mmu_switch(page_table)         -- switch TTBR0/TTBR1 and flush TLB
+#
+# Built-ins assumed from the AArch64 JStar backend:
+#   read64(addr), write64(addr, value), memset(addr, value, size)
+#   msr(sysreg, value), mrs(sysreg), isb(), dsb(domain), tlbi_vae1is(vaddr)
+#   tlbi_vmalle1is()
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# AArch64 translation constants (4KB granule, 48-bit VAs)
+# ----------------------------------------------------------------------------
+global PAGE_SIZE
+store 4096 into PAGE_SIZE
+
+global PAGE_SHIFT
+store 12 into PAGE_SHIFT
+
+global LEVEL_MASK
+store 0x1FF into LEVEL_MASK
+
+# Page/descriptor flags
+global PTE_VALID
+store 1 into PTE_VALID
+
+global PTE_TABLE
+store 2 into PTE_TABLE
+
+global PTE_AF
+store 1024 into PTE_AF            # 1 << 10
+
+global PTE_ATTRIDX_NORMAL
+store 0 into PTE_ATTRIDX_NORMAL
+
+global PTE_ATTRIDX_DEVICE
+store 4 into PTE_ATTRIDX_DEVICE   # AttrIndx 1 in bits [4:2]
+
+global PTE_FLAGS_MASK
+store 0xFFFFFFFFF000 into PTE_FLAGS_MASK
+
+global BLOCK_SIZE
+store 0x40000000 into BLOCK_SIZE  # 1 GB block
+
+global IDENTITY_GB
+store 1 into IDENTITY_GB          # map 1 GB identity
+
+global KERNEL_HIGH_BASE
+store 0xFFFF800000000000 into KERNEL_HIGH_BASE
+
+# ----------------------------------------------------------------------------
+# Early page-table pool (BSS). 32 pages = enough for bootstrap + a few maps.
+# ----------------------------------------------------------------------------
+global early_page_pool
+array 131072 early_page_pool      # 32 * 4096 bytes
+
+global next_page_idx
+store 0 into next_page_idx
+
+global kernel_pgdir
+store 0 into kernel_pgdir
+
+# ----------------------------------------------------------------------------
+# Allocate a zeroed physical page from the early pool.
+# ----------------------------------------------------------------------------
+func page_alloc() -> u64 {
+    let idx: u64 = next_page_idx
+    next_page_idx = next_page_idx + 1
+    let paddr: u64 = early_page_pool + (idx * PAGE_SIZE)
+    memset(paddr, 0, PAGE_SIZE)
+    return paddr
+}
+
+# ----------------------------------------------------------------------------
+# Level index extraction.
+# ----------------------------------------------------------------------------
+func pt_index_l0(vaddr: u64) -> u64 {
+    return (vaddr >> 39) & LEVEL_MASK
+}
+
+func pt_index_l1(vaddr: u64) -> u64 {
+    return (vaddr >> 30) & LEVEL_MASK
+}
+
+func pt_index_l2(vaddr: u64) -> u64 {
+    return (vaddr >> 21) & LEVEL_MASK
+}
+
+func pt_index_l3(vaddr: u64) -> u64 {
+    return (vaddr >> 12) & LEVEL_MASK
+}
+
+# ----------------------------------------------------------------------------
+# Build table and page descriptors.
+# ----------------------------------------------------------------------------
+func pte_table(next_table: u64) -> u64 {
+    return (next_table & PTE_FLAGS_MASK) | PTE_VALID | PTE_TABLE
+}
+
+func pte_page(paddr: u64, flags: u64) -> u64 {
+    return (paddr & PTE_FLAGS_MASK) | flags | PTE_VALID | PTE_AF
+}
+
+# ----------------------------------------------------------------------------
+# Bootstrap MMU: identity-map the first 1GB and map the kernel high region
+# to the same physical low memory.  Enables the MMU on return.
+# ----------------------------------------------------------------------------
+func arch_mmu_init() {
+    let l0: u64 = page_alloc()
+    kernel_pgdir = l0
+
+    # Identity map: one 1GB block at level 1.
+    let l1_identity: u64 = page_alloc()
+    write64(l0 + 0, pte_table(l1_identity))
+
+    let block: u64 = 0
+    while block < IDENTITY_GB {
+        let paddr: u64 = block * BLOCK_SIZE
+        let entry: u64 = (paddr & PTE_FLAGS_MASK)
+                       | PTE_ATTRIDX_NORMAL
+                       | PTE_AF
+                       | PTE_VALID
+        write64(l1_identity + (block * 8), entry)
+        block = block + 1
+    }
+
+    # Kernel high mapping: map 0xFFFF800000000000 -> physical 0 (1GB block).
+    let high_l0_idx: u64 = (KERNEL_HIGH_BASE >> 39) & LEVEL_MASK
+    let l1_high: u64 = page_alloc()
+    write64(l0 + (high_l0_idx * 8), pte_table(l1_high))
+
+    let high_entry: u64 = (0 & PTE_FLAGS_MASK)
+                        | PTE_ATTRIDX_NORMAL
+                        | PTE_AF
+                        | PTE_VALID
+    write64(l1_high + 0, high_entry)
+
+    # Memory attributes: Attr0 = Normal WBWA, Attr1 = Device nGnRnE.
+    msr(MAIR_EL1, 0xFF04)
+
+    # TCR_EL1: 48-bit VAs, 4KB granule for TTBR0 and TTBR1, 40-bit IPS.
+    msr(TCR_EL1, 0x0000000297101710)
+
+    # Point both translation bases at the kernel page table.
+    msr(TTBR0_EL1, l0)
+    msr(TTBR1_EL1, l0)
+    isb()
+
+    # Enable MMU + alignment + caches.
+    let sctlr: u64 = mrs(SCTLR_EL1)
+    sctlr = sctlr | 0x1005
+    msr(SCTLR_EL1, sctlr)
+    isb()
+
+    return
+}
+
+# ----------------------------------------------------------------------------
+# Walk the kernel page tables and create a 4KB mapping.
+# ----------------------------------------------------------------------------
+func arch_mmu_map(vaddr: u64, paddr: u64, flags: u64) -> u64 {
+    let table: u64 = kernel_pgdir
+    let idx0: u64 = pt_index_l0(vaddr)
+    let entry: u64 = read64(table + (idx0 * 8))
+    if (entry & PTE_VALID) == 0 {
+        let next: u64 = page_alloc()
+        write64(table + (idx0 * 8), pte_table(next))
+        table = next
+    } else {
+        table = entry & PTE_FLAGS_MASK
+    }
+
+    let idx1: u64 = pt_index_l1(vaddr)
+    entry = read64(table + (idx1 * 8))
+    if (entry & PTE_VALID) == 0 {
+        let next: u64 = page_alloc()
+        write64(table + (idx1 * 8), pte_table(next))
+        table = next
+    } else {
+        table = entry & PTE_FLAGS_MASK
+    }
+
+    let idx2: u64 = pt_index_l2(vaddr)
+    entry = read64(table + (idx2 * 8))
+    if (entry & PTE_VALID) == 0 {
+        let next: u64 = page_alloc()
+        write64(table + (idx2 * 8), pte_table(next))
+        table = next
+    } else {
+        table = entry & PTE_FLAGS_MASK
+    }
+
+    let idx3: u64 = pt_index_l3(vaddr)
+    write64(table + (idx3 * 8), pte_page(paddr, flags))
+
+    tlbi_vae1is(vaddr)
+    dsb(ish)
+    isb()
+
+    return 0
+}
+
+# ----------------------------------------------------------------------------
+# Remove a 4KB mapping and invalidate the TLB for it.
+# ----------------------------------------------------------------------------
+func arch_mmu_unmap(vaddr: u64) {
+    let table: u64 = kernel_pgdir
+
+    let idx0: u64 = pt_index_l0(vaddr)
+    let entry: u64 = read64(table + (idx0 * 8))
+    if (entry & PTE_VALID) == 0 { return }
+    table = entry & PTE_FLAGS_MASK
+
+    let idx1: u64 = pt_index_l1(vaddr)
+    entry = read64(table + (idx1 * 8))
+    if (entry & PTE_VALID) == 0 { return }
+    table = entry & PTE_FLAGS_MASK
+
+    let idx2: u64 = pt_index_l2(vaddr)
+    entry = read64(table + (idx2 * 8))
+    if (entry & PTE_VALID) == 0 { return }
+    table = entry & PTE_FLAGS_MASK
+
+    let idx3: u64 = pt_index_l3(vaddr)
+    write64(table + (idx3 * 8), 0)
+
+    tlbi_vae1is(vaddr)
+    dsb(ish)
+    isb()
+
+    return
+}
+
+# ----------------------------------------------------------------------------
+# Switch to a new page-table root for EL1.
+# ----------------------------------------------------------------------------
+func arch_mmu_switch(page_table: u64) {
+    msr(TTBR0_EL1, page_table)
+    msr(TTBR1_EL1, page_table)
+    tlbi_vmalle1is()
+    dsb(ish)
+    isb()
+    return
+}

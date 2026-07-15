@@ -1,0 +1,132 @@
+# ============================================================================
+# exceptions.jstr -- AArch64 exception vector table
+# ============================================================================
+# Sets up the EL1 vector table for the Jasterish Micro-Kernel AArch64 port.
+#
+# Public interface:
+#   exceptions_init()  -- build and install the VBAR_EL1 vector table
+#
+# The vector table is 2048 bytes and must be 2048-byte aligned.  It contains
+# 16 entries, each 128 bytes.  Every entry is patched at runtime with an
+# AArch64 unconditional branch to the appropriate handler.
+#
+# Built-ins assumed from the AArch64 JStar backend:
+#   write32(addr, value), msr(sysreg, value), isb()
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Vector-table constants
+# ----------------------------------------------------------------------------
+global VECTOR_TABLE_SIZE
+store 2048 into VECTOR_TABLE_SIZE
+
+global VECTOR_ENTRY_SIZE
+store 128 into VECTOR_ENTRY_SIZE
+
+global VECTOR_GROUP_COUNT
+store 4 into VECTOR_GROUP_COUNT
+
+global BRANCH_OPCODE
+store 0x14000000 into BRANCH_OPCODE
+
+# ----------------------------------------------------------------------------
+# Backing storage for the vector table.  A 2048-byte array is declared, then
+# the actual VBAR address is computed as the next 2KB-aligned offset inside
+# it (so we are guaranteed alignment regardless of how the linker lays out
+# the symbol).
+# ----------------------------------------------------------------------------
+global vector_table
+array 2048 vector_table
+
+# ----------------------------------------------------------------------------
+# Compute a 2048-byte aligned vector-table base address.
+# ----------------------------------------------------------------------------
+func vector_table_base() -> u64 {
+    let align: u64 = VECTOR_TABLE_SIZE - 1
+    bitwise_xor align 0xFFFFFFFFFFFFFFFF
+    let not_align: u64 = it
+    let base: u64 = (vector_table + align) & not_align
+    return base
+}
+
+# ----------------------------------------------------------------------------
+# Patch a single vector entry with a branch to the target handler.
+# The AArch64 unconditional branch encoding is:
+#   0x14000000 | ((target - entry) >> 2)
+# ----------------------------------------------------------------------------
+func vector_write_branch(entry: u64, target: u64) {
+    let offset: u64 = (target - entry) >> 2
+    let insn: u32 = BRANCH_OPCODE | (offset & 0x03FFFFFF)
+    write32(entry, insn)
+    return
+}
+
+# ----------------------------------------------------------------------------
+# Patch all four entries of one vector kind (sync/irq/fiq/serr).
+# kind_offset: 0 = sync, 1 = irq, 2 = fiq, 3 = serr.
+# ----------------------------------------------------------------------------
+func vector_patch_kind(base: u64, handler_addr: u64, kind_offset: u64) {
+    let i: u64 = 0
+    while i < VECTOR_GROUP_COUNT {
+        let idx: u64 = (i * 4) + kind_offset
+        let entry: u64 = base + (idx * VECTOR_ENTRY_SIZE)
+        call vector_write_branch entry handler_addr
+        i = i + 1
+    }
+    return
+}
+
+# ----------------------------------------------------------------------------
+# Install the vector table and point VBAR_EL1 at it.
+# ----------------------------------------------------------------------------
+func exceptions_init() {
+    let base: u64 = vector_table_base()
+
+    let sync_addr: u64 = label_addr(sync_handler)
+    let irq_addr: u64 = label_addr(irq_handler)
+    let fiq_addr: u64 = label_addr(fiq_handler)
+    let serr_addr: u64 = label_addr(serr_handler)
+
+    call vector_patch_kind base sync_addr 0
+    call vector_patch_kind base irq_addr 1
+    call vector_patch_kind base fiq_addr 2
+    call vector_patch_kind base serr_addr 3
+
+    msr(VBAR_EL1, base)
+    isb()
+
+    return
+}
+
+# ----------------------------------------------------------------------------
+# Exception handlers.  Context save/restore is intentionally omitted at this
+# stage; the compiler backend does not yet expose low-level assembly prologue
+# primitives.  These handlers provide the required dispatch shape.
+# ----------------------------------------------------------------------------
+func sync_handler() {
+    call arch_panic "synchronous exception"
+    return
+}
+
+func irq_handler() {
+    let irq: u64 = gic_iar()
+
+    if irq == TIMER_IRQ {
+        call timer_irq_handler
+    } else {
+        # Spurious or unexpected interrupt: acknowledge and ignore.
+    }
+
+    call gic_eoi irq
+    return
+}
+
+func fiq_handler() {
+    call arch_panic "FIQ"
+    return
+}
+
+func serr_handler() {
+    call arch_panic "SError"
+    return
+}

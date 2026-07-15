@@ -1,0 +1,119 @@
+# ============================================================================
+# gic.jstr -- AArch64 GICv2 driver
+# ============================================================================
+# Provides a minimal distributor + CPU-interface driver for the ARM Generic
+# Interrupt Controller on QEMU 'virt'.
+#
+# Public interface:
+#   gic_init()              -- enable distributor and CPU interface
+#   gic_enable_irq(irq)     -- unmask a peripheral IRQ
+#   gic_disable_irq(irq)    -- mask a peripheral IRQ
+#   gic_eoi(irq)            -- signal end-of-interrupt
+#   gic_iar() -> u64        -- read interrupt acknowledge register
+#
+# Built-ins assumed from the AArch64 JStar backend:
+#   read32(addr), write32(addr, value)
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# GICv2 memory-mapped base addresses
+# ----------------------------------------------------------------------------
+global GICD_BASE
+store 0x08000000 into GICD_BASE    # Distributor
+
+global GICC_BASE
+store 0x08010000 into GICC_BASE    # CPU interface
+
+# Distributor register offsets
+global GICD_CTLR
+store 0x000 into GICD_CTLR         # Distributor Control Register
+
+global GICD_ISENABLER
+store 0x100 into GICD_ISENABLER    # Interrupt Set-Enable Registers
+
+global GICD_ICENABLER
+store 0x180 into GICD_ICENABLER    # Interrupt Clear-Enable Registers
+
+global GICD_ICPENDR
+store 0x280 into GICD_ICPENDR      # Interrupt Clear-Pending Registers
+
+# CPU interface register offsets
+global GICC_CTLR
+store 0x000 into GICC_CTLR         # CPU Interface Control Register
+
+global GICC_PMR
+store 0x004 into GICC_PMR          # Priority Mask Register
+
+global GICC_BPR
+store 0x008 into GICC_BPR          # Binary Point Register
+
+global GICC_IAR
+store 0x00C into GICC_IAR          # Interrupt Acknowledge Register
+
+global GICC_EOIR
+store 0x010 into GICC_EOIR         # End of Interrupt Register
+
+# Control register values
+global GICD_CTLR_ENABLE
+store 1 into GICD_CTLR_ENABLE
+
+global GICC_CTLR_ENABLE
+store 1 into GICC_CTLR_ENABLE
+
+# ----------------------------------------------------------------------------
+# Initialize the GIC: enable distributor, enable CPU interface, allow all
+# priorities, and set a sensible binary point.
+# ----------------------------------------------------------------------------
+func gic_init() {
+    write32(GICD_BASE + GICD_CTLR, GICD_CTLR_ENABLE)
+    write32(GICC_BASE + GICC_PMR, 0xFF)
+    write32(GICC_BASE + GICC_BPR, 0x00)
+    write32(GICC_BASE + GICC_CTLR, GICC_CTLR_ENABLE)
+    return
+}
+
+# ----------------------------------------------------------------------------
+# Enable (unmask) a shared peripheral interrupt.
+# ----------------------------------------------------------------------------
+func gic_enable_irq(irq: u64) {
+    let reg: u64 = (irq / 32) * 4
+    let bit: u64 = irq % 32
+    write32(GICD_BASE + GICD_ISENABLER + reg, 1 << bit)
+    return
+}
+
+# ----------------------------------------------------------------------------
+# Disable (mask) a shared peripheral interrupt.
+# ----------------------------------------------------------------------------
+func gic_disable_irq(irq: u64) {
+    let reg: u64 = (irq / 32) * 4
+    let bit: u64 = irq % 32
+    write32(GICD_BASE + GICD_ICENABLER + reg, 1 << bit)
+    return
+}
+
+# ----------------------------------------------------------------------------
+# Clear a pending interrupt.
+# ----------------------------------------------------------------------------
+func gic_clear_pending(irq: u64) {
+    let reg: u64 = (irq / 32) * 4
+    let bit: u64 = irq % 32
+    write32(GICD_BASE + GICD_ICPENDR + reg, 1 << bit)
+    return
+}
+
+# ----------------------------------------------------------------------------
+# Signal end-of-interrupt to the CPU interface.
+# ----------------------------------------------------------------------------
+func gic_eoi(irq: u64) {
+    write32(GICC_BASE + GICC_EOIR, irq)
+    return
+}
+
+# ----------------------------------------------------------------------------
+# Read the Interrupt Acknowledge Register and return the interrupt ID.
+# ----------------------------------------------------------------------------
+func gic_iar() -> u64 {
+    let iar: u32 = read32(GICC_BASE + GICC_IAR)
+    return iar & 0x3FF
+}

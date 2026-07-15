@@ -77,7 +77,13 @@ GRUB_MKRESCUE   := grub-mkrescue
 # all remaining files via --include. Do not add files that do not exist.
 
 ifeq ($(ARCH),aarch64)
-  JSTR_SRCS := arch/aarch64/boot.jstr
+  JSTR_SRCS := arch/aarch64/boot.jstr \
+               arch/aarch64/memory_arch.jstr \
+               arch/aarch64/uart.jstr \
+               arch/aarch64/gic.jstr \
+               arch/aarch64/timer.jstr \
+               arch/aarch64/exceptions.jstr \
+               arch/aarch64/hal.jstr
   LINKER_SCRIPT := arch/aarch64/linker.ld
   QEMU := qemu-system-aarch64
   QEMU_MACHINE := virt

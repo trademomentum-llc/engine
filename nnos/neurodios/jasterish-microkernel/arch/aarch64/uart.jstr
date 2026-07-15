@@ -1,0 +1,107 @@
+# ============================================================================
+# uart.jstr -- AArch64 PL011 UART driver
+# ============================================================================
+# Provides polled serial input/output for the Jasterish Micro-Kernel AArch64
+# port on QEMU 'virt' (PL011 at 0x09000000).
+#
+# Public interface:
+#   uart_init()        -- configure the UART for 115200 8N1
+#   arch_putc(c: u8)   -- transmit one character
+#   arch_getc() -> u64 -- receive one character, or 0xFFFFFFFFFFFFFFFF if none
+#
+# Built-ins assumed from the AArch64 JStar backend:
+#   read32(addr), write32(addr, value)
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# PL011 register offsets and base address
+# ----------------------------------------------------------------------------
+global UART_BASE
+store 0x09000000 into UART_BASE
+
+global UART_DR
+store 0x00 into UART_DR          # Data Register
+
+global UART_FR
+store 0x18 into UART_FR          # Flag Register
+
+global UART_IBRD
+store 0x24 into UART_IBRD        # Integer Baud Rate Divisor
+
+global UART_FBRD
+store 0x28 into UART_FBRD        # Fractional Baud Rate Divisor
+
+global UART_LCR_H
+store 0x2C into UART_LCR_H       # Line Control Register
+
+global UART_CR
+store 0x30 into UART_CR          # Control Register
+
+global UART_ICR
+store 0x44 into UART_ICR         # Interrupt Clear Register
+
+# Flag register bits
+global UART_FR_TXFF
+store 0x20 into UART_FR_TXFF     # Transmit FIFO full
+
+global UART_FR_RXFE
+store 0x10 into UART_FR_RXFE     # Receive FIFO empty
+
+# Control register bits
+global UART_CR_UARTEN
+store 0x01 into UART_CR_UARTEN   # UART enable
+
+global UART_CR_TXE
+store 0x100 into UART_CR_TXE     # Transmit enable
+
+global UART_CR_RXE
+store 0x200 into UART_CR_RXE     # Receive enable
+
+# ----------------------------------------------------------------------------
+# Configure the PL011 for 115200 baud, 8 data bits, no parity, 1 stop bit.
+# QEMU's virt PL011 uses a 24 MHz reference clock.
+# ----------------------------------------------------------------------------
+func uart_init() {
+    # Disable the UART while configuring.
+    write32(UART_BASE + UART_CR, 0)
+
+    # 24 MHz / (16 * 115200) = 13.0208 -> IBRD=13, FBRD=round(0.0208*64)=1.
+    write32(UART_BASE + UART_IBRD, 13)
+    write32(UART_BASE + UART_FBRD, 1)
+
+    # Line control: 8-bit word length, FIFOs enabled.
+    write32(UART_BASE + UART_LCR_H, 0x70)
+
+    # Clear any pending interrupts.
+    write32(UART_BASE + UART_ICR, 0xFFFFFFFF)
+
+    # Enable UART, transmitter, and receiver.
+    write32(UART_BASE + UART_CR, UART_CR_UARTEN | UART_CR_TXE | UART_CR_RXE)
+
+    return
+}
+
+# ----------------------------------------------------------------------------
+# Transmit a single character (blocking poll).
+# ----------------------------------------------------------------------------
+func arch_putc(c: u8) {
+    # Wait until the transmit FIFO is no longer full.
+    while (read32(UART_BASE + UART_FR) & UART_FR_TXFF) != 0 {
+    }
+
+    write32(UART_BASE + UART_DR, c)
+    return
+}
+
+# ----------------------------------------------------------------------------
+# Receive a single character.  Returns the byte (0-255) or -1 if no data.
+# ----------------------------------------------------------------------------
+func arch_getc() -> u64 {
+    if (read32(UART_BASE + UART_FR) & UART_FR_RXFE) != 0 {
+        return 0xFFFFFFFFFFFFFFFF
+    }
+
+    let data: u32 = read32(UART_BASE + UART_DR)
+    let ch: u64 = data & 0xFF
+    return ch
+}

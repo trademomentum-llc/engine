@@ -1,0 +1,112 @@
+# ============================================================================
+# hal.jstr -- AArch64 Hardware Abstraction Layer top-level
+# ============================================================================
+# Orchestrates architecture initialization and provides the generic kernel
+# interface expected by arch-independent code.
+#
+# Public interface:
+#   arch_init(dtb_ptr)    -- initialize UART, GIC, exceptions, timer
+#   arch_irq_enable()     -- unmask IRQs at the CPU
+#   arch_irq_disable()    -- mask IRQs at the CPU
+#   arch_panic(msg)       -- print a message and halt forever
+#   kernel_main()         -- common kernel entry point
+#   schedule()            -- scheduler stub used by the timer handler
+#
+# Built-ins assumed from the AArch64 JStar backend:
+#   mrs(sysreg), msr(sysreg, value), wfe, read8(addr)
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Architecture initialization.
+# dtb_ptr is the physical address of the device tree blob passed in x0 by
+# the bootloader; it is saved for future parsing.
+# ----------------------------------------------------------------------------
+global dtb_phys_addr
+store 0 into dtb_phys_addr
+
+func arch_init(dtb_ptr: u64) {
+    dtb_phys_addr = dtb_ptr
+
+    call uart_init
+    call exceptions_init
+    call gic_init
+
+    # Use the counter frequency for the timer initialization.
+    let freq: u64 = mrs(CNTFRQ_EL0)
+    call arch_timer_init freq
+
+    return
+}
+
+# ----------------------------------------------------------------------------
+# Enable and disable IRQs/FIQs at the CPU by manipulating DAIF.
+# ----------------------------------------------------------------------------
+func arch_irq_enable() {
+    msr(DAIFClr, 0xF)
+    isb()
+    return
+}
+
+func arch_irq_disable() {
+    msr(DAIFSet, 0xF)
+    isb()
+    return
+}
+
+# ----------------------------------------------------------------------------
+# Print a NUL-terminated string over the PL011, one character at a time.
+# ----------------------------------------------------------------------------
+func arch_print_string(msg: u64) {
+    let p: u64 = msg
+    while true {
+        let ch: u8 = read8(p)
+        if ch == 0 {
+            return
+        }
+        call arch_putc ch
+        p = p + 1
+    }
+    return
+}
+
+# ----------------------------------------------------------------------------
+# Kernel panic: report the failure and halt.
+# ----------------------------------------------------------------------------
+func arch_panic(msg: u64) {
+    call arch_irq_disable
+
+    # Print a banner and the caller-provided message.
+    call arch_print_string "\n!!! KERNEL PANIC: "
+    call arch_print_string msg
+    call arch_print_string "\n"
+
+    # Halt forever with interrupts disabled.
+    while true {
+        wfe
+    }
+
+    return
+}
+
+# ----------------------------------------------------------------------------
+# Minimal scheduler stub.  A real scheduler belongs in the common kernel,
+# but the AArch64 timer handler needs a symbol to call.
+# ----------------------------------------------------------------------------
+func schedule() {
+    return
+}
+
+# ----------------------------------------------------------------------------
+# Common kernel main entry point.  After architecture setup, print a banner
+# and enter the idle loop.
+# ----------------------------------------------------------------------------
+func kernel_main() {
+    call arch_print_string "Jasterish Micro-Kernel AArch64 ready\n"
+    call arch_irq_enable
+
+    while true {
+        wfe
+    }
+
+    return
+}
