@@ -105,3 +105,12 @@ func arch_getc() -> u64 {
     let ch: u64 = data & 0xFF
     return ch
 }
+
+# ----------------------------------------------------------------------------
+# HAL-compatible init wrapper for the PL011.
+# The node parameter is reserved for future DTB-based base-address discovery.
+# ----------------------------------------------------------------------------
+func pl011_init(node: u64) -> u32 {
+    call uart_init
+    return 0
+}

@@ -117,3 +117,12 @@ func gic_iar() -> u64 {
     let iar: u32 = read32(GICC_BASE + GICC_IAR)
     return iar & 0x3FF
 }
+
+# ----------------------------------------------------------------------------
+# HAL-compatible init wrapper for the ARM GICv2.
+# The node parameter is reserved for future DTB-based base-address discovery.
+# ----------------------------------------------------------------------------
+func gicv2_init(node: u64) -> u32 {
+    call gic_init
+    return 0
+}
