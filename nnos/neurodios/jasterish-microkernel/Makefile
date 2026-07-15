@@ -94,7 +94,6 @@ ifeq ($(ARCH),aarch64)
   QEMU := qemu-system-aarch64
   QEMU_MACHINE := virt
   QEMU_CPU := cortex-a72
-  QEMU_FLAGS := -machine $(QEMU_MACHINE) -cpu $(QEMU_CPU) -m 512 -serial stdio -no-reboot -no-shutdown
 else
   JSTR_SRCS := arch/x86_64/boot.jstr \
                arch/x86_64/idt.jstr \
@@ -111,7 +110,6 @@ else
   QEMU := qemu-system-x86_64
   QEMU_MACHINE := q35
   QEMU_CPU := qemu64
-  QEMU_FLAGS := -machine $(QEMU_MACHINE) -cpu $(QEMU_CPU) -m 512 -serial stdio -no-reboot -no-shutdown
 endif
 
 # Object files (one .o per .jstr)
