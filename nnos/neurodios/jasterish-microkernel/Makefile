@@ -46,7 +46,9 @@ KERNEL_ISO      := $(KERNEL_NAME).iso
 
 # Jasterish compiler.
 # The real compiler on this machine is the morphlex JStar frontend.
-JSTAR           := /Users/nnos/Projects/apps/target/debug/morphlex jstar compile
+# Override JASTERISH_COMPILER via environment or make variable for CI.
+JASTERISH_COMPILER ?= /Users/nnos/Projects/apps/target/debug/morphlex
+JSTAR           := $(JASTERISH_COMPILER) jstar compile
 
 # Cross-compiler toolchain (adjust prefix if using a cross-compiler)
 ifeq ($(ARCH),aarch64)

@@ -42,19 +42,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Checkout apps repo
+        uses: actions/checkout@v4
+        with:
+          repository: trademomentum-llc/apps
+          path: apps
+
       - name: Install AArch64 dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y qemu-system-aarch64 gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
-      # The JStar compiler lives in a separate repository. In a full CI setup
-      # it should be checked out as a sibling of this workspace.
       - name: Build JStar compiler
         run: |
-          cd ../apps
+          cd apps
           cargo build --release
 
       - name: Build AArch64 micro-kernel
+        env:
+          JASTERISH_COMPILER: ${{ github.workspace }}/apps/target/release/morphlex
         run: |
           cd nnos/neurodios/jasterish-microkernel
           make ARCH=aarch64 clean
