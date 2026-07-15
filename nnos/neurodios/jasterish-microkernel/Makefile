@@ -83,6 +83,7 @@ ifeq ($(ARCH),aarch64)
                arch/aarch64/gic.jstr \
                arch/aarch64/timer.jstr \
                arch/aarch64/exceptions.jstr \
+               arch/aarch64/fdt.jstr \
                arch/aarch64/hal.jstr \
                common/elf.jstr \
                common/process.jstr \
