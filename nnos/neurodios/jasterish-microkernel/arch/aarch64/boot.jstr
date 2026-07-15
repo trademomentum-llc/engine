@@ -1,0 +1,73 @@
+section .text.startup
+
+# AArch64 early boot stub for the Jasterish Micro-Kernel.
+# This file provides the _start entry point, exception-level drop from
+# EL2 to EL1, initial EL1 stack setup, and hand-off to architecture
+# initialization and the common kernel main routine.
+#
+# Interfaces:
+#   _start()           - kernel entry point, loaded by QEMU/bootloader
+#   arch_mmu_init()    - early MMU bootstrap (stub for Task 9)
+#   arch_init(dtb_ptr) - architecture-specific initialization
+#   kernel_main()      - common kernel main
+
+# Stub: early page-table / MMU initialization.
+# Real mapping will be implemented in Task 9.
+func arch_mmu_init() {
+    return
+}
+
+# Stub: architecture-specific initialization.
+# On AArch64 this will eventually parse the DTB and set up the GIC,
+# UART, timer, etc.
+func arch_init(dtb_ptr: u64) {
+    return
+}
+
+# Stub: common kernel main entry point.
+func kernel_main() {
+    return
+}
+
+# Kernel entry point.
+func _start() {
+    # x0 = DTB physical address (passed by QEMU or bootloader).
+    # Save it in a callee-saved register for later use.
+    let dtb_phys: u64 = x0
+
+    # Detect current exception level.
+    let current_el: u64 = mrs(CurrentEL)
+    current_el = current_el >> 2
+    current_el = current_el & 3
+
+    # If we are running at EL2 (e.g. under QEMU with virtualiation extension),
+    # configure the hypervisor and drop to EL1.
+    if current_el == 2 {
+        # Configure HCR_EL2 to route exceptions to EL1.
+        msr(HCR_EL2, 0x80000000)
+        # Set SPSR_EL2: EL1h, interrupts masked.
+        msr(SPSR_EL2, 0x3C5)
+        # Set ELR_EL2 to the address after the eret.
+        msr(ELR_EL2, label_addr(el1_entry))
+        eret
+    }
+
+el1_entry:
+    # Set up EL1 stack at a fixed high address.
+    let stack_top: u64 = 0xFFFF800000100000
+    msr(SP_EL1, stack_top)
+
+    # Enable MMU (stub for now; Task 9 implements real mapping).
+    call arch_mmu_init
+
+    # Jump to arch_init with DTB pointer.
+    call arch_init(dtb_phys)
+
+    # Enter common kernel.
+    call kernel_main
+
+    # Halt if kernel_main returns.
+halt:
+    wfe
+    branch halt
+}
