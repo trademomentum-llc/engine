@@ -46,7 +46,7 @@ store "x86-64" into kernel_arch
 # Function: kernel_main
 # -----------------------------------------------------------------------------
 # The primary kernel initialization function. Called once from _start in
-# arch/x86_64/boot.jstr. This function never returns -- it transitions directly into
+# arch/<ARCH>/boot.jstr. This function never returns -- it transitions directly into
 # the scheduler loop.
 #
 # Phase 1: Output kernel identification banner
