@@ -6,7 +6,8 @@
 #
 # Public interface:
 #   fdt_init(dtb_phys) -> u32        -- validate magic and cache header fields
-#   fdt_find_node(compatible) -> u64 -- return node struct offset or 0
+#   fdt_find_node(compatible) -> u64 -- return absolute address of the matching
+#                                       FDT_BEGIN_NODE token, or 0 if not found
 #   fdt_get_reg(node, idx, out_addr, out_size) -> u32
 #
 # Built-ins assumed from the AArch64 JStar backend:
@@ -71,17 +72,45 @@ func fdt_read64_be(addr: u64) -> u64 {
 
 # ----------------------------------------------------------------------------
 # Initialize the parser from a physical DTB address.
-# Returns 0 on success, 1 if the magic is wrong.
+# Returns 0 on success, 1 if the magic is wrong or the header is out of bounds.
 # ----------------------------------------------------------------------------
 func fdt_init(dtb_phys: u64) -> u32 {
     fdt_base = dtb_phys
     let magic: u32 = fdt_read32_be(dtb_phys)
     if magic != FDT_MAGIC {
+        fdt_base = 0
         return 1
     }
-    fdt_struct_off = fdt_read32_be(dtb_phys + 8)
-    fdt_strings_off = fdt_read32_be(dtb_phys + 12)
-    fdt_struct_size = fdt_read32_be(dtb_phys + 36)
+
+    let totalsize: u32 = fdt_read32_be(dtb_phys + 4)
+    let off_dt_struct: u32 = fdt_read32_be(dtb_phys + 8)
+    let off_dt_strings: u32 = fdt_read32_be(dtb_phys + 12)
+    let size_dt_struct: u32 = fdt_read32_be(dtb_phys + 36)
+
+    # Basic bounds validation: all header offsets must lie inside the DTB
+    # image described by totalsize, and the structure block must not extend
+    # past the end of the image. This catches truncated or corrupt DTBs early
+    # before the token walker reads past the DTB boundary.
+    if off_dt_struct >= totalsize {
+        fdt_base = 0
+        return 1
+    }
+    if off_dt_strings >= totalsize {
+        fdt_base = 0
+        return 1
+    }
+    if size_dt_struct > totalsize {
+        fdt_base = 0
+        return 1
+    }
+    if off_dt_struct + size_dt_struct > totalsize {
+        fdt_base = 0
+        return 1
+    }
+
+    fdt_struct_off = off_dt_struct
+    fdt_strings_off = off_dt_strings
+    fdt_struct_size = size_dt_struct
     return 0
 }
 
@@ -190,9 +219,17 @@ func fdt_find_node(compatible: u64) -> u64 {
 
 # ----------------------------------------------------------------------------
 # Read the idx-th (addr, size) pair from the node's 'reg' property.
-# This stub assumes 64-bit address and size cells (address-cells=2,
-# size-cells=2), which is common on ARM64 device trees. Writes the pair to
-# the addresses given by out_addr and out_size. Returns 0 on success.
+#
+# WARNING: This function hard-codes 64-bit address and size cells, i.e. it
+# assumes #address-cells=2 and #size-cells=2. It does NOT parse the parent
+# #address-cells / #size-cells properties, nor does it handle 32-bit cells.
+# This is acceptable for the current QEMU 'virt' and Pixel/Tensor G4 stubs,
+# where ARM64 device trees conventionally use two 32-bit cells per field.
+# A full implementation would walk the parent chain and scale pair_size by
+# the actual cell counts.
+#
+# Writes the pair to the addresses given by out_addr and out_size.
+# Returns 0 on success.
 # ----------------------------------------------------------------------------
 func fdt_get_reg(node: u64, idx: u32, out_addr: u64, out_size: u64) -> u32 {
     let base: u64 = fdt_base
