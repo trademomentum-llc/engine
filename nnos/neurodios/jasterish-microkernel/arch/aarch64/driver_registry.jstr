@@ -1,9 +1,9 @@
 # ============================================================================
-# pixel_hal.jstr -- Pixel/Tensor G4 HAL driver registry and stubs
+# driver_registry.jstr -- AArch64 HAL driver registry
 # ============================================================================
-# Device-tree driven driver registration table and Pixel/Tensor G4 specific
-# init stubs. This file is kept separate from the generic AArch64 HAL so that
-# board-specific code can evolve without coupling to QEMU 'virt' bring-up.
+# Device-tree driven driver registration table. This file is kept separate
+# from the generic AArch64 HAL so that board-specific and QEMU 'virt' driver
+# registration can evolve without coupling to the core bring-up code.
 #
 # Public interface:
 #   hal_register_qemu_drivers()  -- register the QEMU 'virt' drivers

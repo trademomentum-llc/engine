@@ -83,14 +83,24 @@ func fdt_init(dtb_phys: u64) -> u32 {
     }
 
     let totalsize: u32 = fdt_read32_be(dtb_phys + 4)
+
+    # The fixed FDT header is 40 bytes long. Reject any image that does not
+    # even contain the full header before reading the remaining fields.
+    if totalsize < 40 {
+        fdt_base = 0
+        return 1
+    }
+
     let off_dt_struct: u32 = fdt_read32_be(dtb_phys + 8)
     let off_dt_strings: u32 = fdt_read32_be(dtb_phys + 12)
+    let size_dt_strings: u32 = fdt_read32_be(dtb_phys + 32)
     let size_dt_struct: u32 = fdt_read32_be(dtb_phys + 36)
 
-    # Basic bounds validation: all header offsets must lie inside the DTB
-    # image described by totalsize, and the structure block must not extend
-    # past the end of the image. This catches truncated or corrupt DTBs early
-    # before the token walker reads past the DTB boundary.
+    # Basic bounds validation: all header offsets and block sizes must lie
+    # inside the DTB image described by totalsize. These checks catch
+    # truncated or corrupt DTBs early, before the token walker reads past
+    # the DTB boundary. The additive checks are written in overflow-safe
+    # form (a + b <= c is tested as a > c - b after confirming b <= c).
     if off_dt_struct >= totalsize {
         fdt_base = 0
         return 1
@@ -99,11 +109,19 @@ func fdt_init(dtb_phys: u64) -> u32 {
         fdt_base = 0
         return 1
     }
+    if size_dt_strings > totalsize {
+        fdt_base = 0
+        return 1
+    }
     if size_dt_struct > totalsize {
         fdt_base = 0
         return 1
     }
-    if off_dt_struct + size_dt_struct > totalsize {
+    if off_dt_strings > totalsize - size_dt_strings {
+        fdt_base = 0
+        return 1
+    }
+    if off_dt_struct > totalsize - size_dt_struct {
         fdt_base = 0
         return 1
     }
