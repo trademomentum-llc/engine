@@ -7,15 +7,15 @@
 #
 # Build Chain:
 #   1. Jasterish Compiler (jstar): .jstr -> .o (ELF64 object files)
-#   2. x86-64 ELF Linker (ld):     .o files -> kernel.elf
+#   2. Target ELF Linker (ld):     .o files -> kernel.elf
 #   3. Object Copy (objcopy):       kernel.elf -> kernel.bin (raw binary)
 #
 # Tools Required:
 #   - jstar          : Jasterish compiler (bootstrap or self-hosted)
-#   - x86_64-elf-ld  : x86-64 ELF linker (from binutils or cross-compiler)
-#   - x86_64-elf-objcopy : Object file conversion utility
+#   - $(ARCH)-elf-ld : Target ELF linker (from binutils or cross-compiler)
+#   - $(ARCH)-elf-objcopy : Object file conversion utility
 #   - grub-mkrescue  : GRUB2 rescue image creator (for ISO target)
-#   - qemu-system-x86_64 : QEMU emulator (for run/debug targets)
+#   - qemu-system-$(ARCH) : QEMU emulator (for run/debug targets)
 #   - gdb            : GNU debugger (for debug target)
 #
 # Usage:
@@ -45,17 +45,21 @@ KERNEL_ISO      := $(KERNEL_NAME).iso
 
 # Compiler and linker tools
 # Use JASTERISH_COMPILER environment variable, or default to "jstar"
-JSTAR           := $(JASTERISH_COMPILER:jstar)
+JSTAR           := $(or $(JASTERISH_COMPILER),jstar)
 
 # Cross-compiler toolchain (adjust prefix if using a cross-compiler)
-CROSS_PREFIX    := $(CROSS_COMPILE:x86_64-elf-)
+ifeq ($(ARCH),aarch64)
+  CROSS_PREFIX  := $(or $(CROSS_COMPILE),aarch64-elf-)
+else
+  CROSS_PREFIX  := $(or $(CROSS_COMPILE),x86_64-elf-)
+endif
 CC              := $(CROSS_PREFIX)gcc
 LD              := $(CROSS_PREFIX)ld
 OBJCOPY         := $(CROSS_PREFIX)objcopy
 OBJDUMP         := $(CROSS_PREFIX)objdump
 
 # Emulator and debugger
-QEMU            := qemu-system-x86_64
+# QEMU is selected by ARCH in the source-file block below.
 GDB             := gdb
 
 # GRUB2 tools
@@ -66,18 +70,49 @@ GRUB_MKRESCUE   := grub-mkrescue
 # ----------------------------------------------------------------------------
 # All Jasterish source files for the kernel.
 # Order matters: boot must be first (contains _start entry point).
+# Architecture-specific sources live under arch/$(ARCH)/;
+# portable kernel services live under common/.
 
-JSTR_SRCS       := boot.jstr \
-                   memory.jstr \
-                   elf.jstr \
-                   process.jstr \
-                   ipc.jstr \
-                   syscall.jstr \
-                   drivers.jstr \
-                   idt.jstr \
-                   disk.jstr \
-                   vfs.jstr \
-                   kernel.jstr
+ifeq ($(ARCH),aarch64)
+  JSTR_SRCS := arch/aarch64/boot.jstr \
+               arch/aarch64/exceptions.jstr \
+               arch/aarch64/memory_arch.jstr \
+               arch/aarch64/gic.jstr \
+               arch/aarch64/timer.jstr \
+               arch/aarch64/uart.jstr \
+               arch/aarch64/fdt.jstr \
+               arch/aarch64/hal.jstr \
+               common/memory_common.jstr \
+               common/elf.jstr \
+               common/process.jstr \
+               common/ipc.jstr \
+               common/syscall.jstr \
+               common/vfs.jstr \
+               common/disk.jstr \
+               common/kernel.jstr
+  LINKER_SCRIPT := arch/aarch64/linker.ld
+  QEMU := qemu-system-aarch64
+  QEMU_MACHINE := virt
+  QEMU_CPU := cortex-a72
+  QEMU_FLAGS := -machine $(QEMU_MACHINE) -cpu $(QEMU_CPU) -m 512 -serial stdio -no-reboot -no-shutdown
+else
+  JSTR_SRCS := arch/x86_64/boot.jstr \
+               arch/x86_64/idt.jstr \
+               arch/x86_64/memory_arch.jstr \
+               arch/x86_64/drivers.jstr \
+               common/elf.jstr \
+               common/process.jstr \
+               common/ipc.jstr \
+               common/syscall.jstr \
+               common/vfs.jstr \
+               common/disk.jstr \
+               common/kernel.jstr
+  LINKER_SCRIPT := arch/x86_64/linker.ld
+  QEMU := qemu-system-x86_64
+  QEMU_MACHINE := q35
+  QEMU_CPU := qemu64
+  QEMU_FLAGS := -machine $(QEMU_MACHINE) -cpu $(QEMU_CPU) -m 512 -serial stdio -no-reboot -no-shutdown
+endif
 
 # Object files (one .o per .jstr)
 OBJS            := $(JSTR_SRCS:.jstr=.o)
@@ -90,13 +125,13 @@ DEPS            := $(OBJS:.o=.d)
 # ----------------------------------------------------------------------------
 
 # Jasterish compiler flags
-#   --target x86_64     : Generate x86-64 machine code
+#   --target $(ARCH)    : Generate target machine code
 #   --format elf        : Output ELF64 object files
 #   --optimize 2        : Optimization level 2 (default)
 #   --debug             : Include debug information
 #   --warn-all          : Enable all warnings
 #   --output            : Specify output file
-JSTARFLAGS      := --target x86_64 \
+JSTARFLAGS      := --target $(ARCH) \
                    --format elf \
                    --optimize 2 \
                    --warn-all
@@ -106,11 +141,11 @@ CPPFLAGS        := -I. -DJMK_KERNEL \
                    -DARCH_$(shell echo $(ARCH) | tr '[:lower:]' '[:upper:]')
 
 # Linker flags
-#   -T linker.ld        : Use our custom linker script
+#   -T $(LINKER_SCRIPT) : Use our custom linker script
 #   -nostdlib           : Do not link against standard libraries
 #   -static             : Static linking only
 #   -z max-page-size=4096 : Set maximum page size to 4KB
-LDFLAGS         := -T linker.ld \
+LDFLAGS         := -T $(LINKER_SCRIPT) \
                    -nostdlib \
                    -static \
                    -z max-page-size=4096 \
@@ -124,8 +159,7 @@ LDMAP           := $(KERNEL_NAME).map
 # ----------------------------------------------------------------------------
 
 # QEMU machine settings
-QEMU_MACHINE    := q35
-QEMU_CPU        := qemu64
+# QEMU and QEMU_MACHINE/QEMU_CPU are selected by ARCH above.
 QEMU_MEM        := 512
 
 # QEMU common flags
@@ -196,7 +230,7 @@ build: $(KERNEL_BIN) $(KERNEL_ELF)
 	@$(JSTAR) $(JSTARFLAGS) --input $< --output $@
 
 # Rule: Link all objects into kernel ELF
-$(KERNEL_ELF): $(OBJS) linker.ld
+$(KERNEL_ELF): $(OBJS) $(LINKER_SCRIPT)
 	@echo "  LD      $@"
 	@$(LD) $(LDFLAGS) -o $@ $(OBJS) -Map=$(LDMAP)
 
@@ -240,7 +274,11 @@ debug: build
 
 # Create GDB initialization script
 gdbinit:
+ifeq ($(ARCH),aarch64)
+	@echo "set architecture aarch64" > $(GDB_INIT)
+else
 	@echo "set architecture i386:x86-64" > $(GDB_INIT)
+endif
 	@echo "$(GDB_SYMBOLS)" >> $(GDB_INIT)
 	@echo "$(GDB_TARGET)" >> $(GDB_INIT)
 	@echo "set disassemble-next-line on" >> $(GDB_INIT)
@@ -343,10 +381,12 @@ help:
 	@echo "  make help         Show this help message"
 	@echo ""
 	@echo "Configuration Variables:"
+	@echo "  ARCH                 Target architecture (x86_64 | aarch64, default: x86_64)"
 	@echo "  JASTERISH_COMPILER   Jasterish compiler path (default: jstar)"
 	@echo "  CROSS_COMPILE        Cross-compiler prefix (default: x86_64-elf-)"
 	@echo "  QEMU_MEM             QEMU RAM in MB (default: 512)"
 	@echo ""
-	@echo "Example:"
+	@echo "Examples:"
+	@echo "  make ARCH=x86_64"
 	@echo "  make JASTERISH_COMPILER=/usr/local/bin/jstar run"
 	@echo ""
