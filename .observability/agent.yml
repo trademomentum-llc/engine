@@ -1,0 +1,24 @@
+project: engine
+language: c
+git:
+  enabled: true
+test:
+  - name: aarch64-smoke
+    command:
+      - ./nnos/neurodios/jasterish-microkernel/scripts/smoke_aarch64.sh
+    parser: shell-exit
+    timeout: 120
+build:
+  - name: aarch64-kernel
+    command:
+      - make
+      - ARCH=aarch64
+      - build
+    cwd: nnos/neurodios/jasterish-microkernel
+    parser: shell-exit
+    timeout: 120
+artifacts:
+  - name: jmk-bin
+    path: nnos/neurodios/jasterish-microkernel/jmk.bin
+  - name: jmk-elf
+    path: nnos/neurodios/jasterish-microkernel/jmk.elf
