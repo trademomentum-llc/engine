@@ -1,18 +1,15 @@
-# ============================================================================
+###############################################################################
 # fdt.jstr -- Flattened Device Tree parser for AArch64 JMK
-# ============================================================================
+###############################################################################
 # Minimal big-endian DTB parser used to discover device nodes on QEMU 'virt'
 # and future Pixel/Tensor G4 targets.
 #
 # Public interface:
-#   fdt_init(dtb_phys) -> u32        -- validate magic and cache header fields
-#   fdt_find_node(compatible) -> u64 -- return absolute address of the matching
+#   fdt_init(dtb_phys) -> long        -- validate magic and cache header fields
+#   fdt_find_node(compatible) -> long -- return absolute address of the matching
 #                                       FDT_BEGIN_NODE token, or 0 if not found
-#   fdt_get_reg(node, idx, out_addr, out_size) -> u32
-#
-# Built-ins assumed from the AArch64 JStar backend:
-#   read8(addr), write64(addr, value)
-# ============================================================================
+#   fdt_get_reg(node, idx, out_addr, out_size) -> long
+###############################################################################
 
 # ----------------------------------------------------------------------------
 # FDT header and token constants
@@ -53,187 +50,368 @@ store 0 into fdt_struct_size
 # ----------------------------------------------------------------------------
 # Read a big-endian 32-bit word one byte at a time.
 # ----------------------------------------------------------------------------
-func fdt_read32_be(addr: u64) -> u32 {
-    let b0: u32 = read8(addr)
-    let b1: u32 = read8(addr + 1)
-    let b2: u32 = read8(addr + 2)
-    let b3: u32 = read8(addr + 3)
-    return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
-}
+function fdt_read32_be with long addr
+    a b0
+    a b1
+    a b2
+    a b3
+    a tmp
+    a result
+
+    call mmio_read8 addr
+    store it into b0
+    add addr 1
+    store it into tmp
+    call mmio_read8 tmp
+    store it into b1
+    add addr 2
+    store it into tmp
+    call mmio_read8 tmp
+    store it into b2
+    add addr 3
+    store it into tmp
+    call mmio_read8 tmp
+    store it into b3
+
+    shift b0 24
+    store it into result
+    shift b1 16
+    store it into tmp
+    bitor result tmp
+    store it into result
+    shift b2 8
+    store it into tmp
+    bitor result tmp
+    store it into result
+    bitor result b3
+    store it into result
+    return result
+end
 
 # ----------------------------------------------------------------------------
 # Read a big-endian 64-bit word as two 32-bit halves.
 # ----------------------------------------------------------------------------
-func fdt_read64_be(addr: u64) -> u64 {
-    let hi: u64 = fdt_read32_be(addr)
-    let lo: u64 = fdt_read32_be(addr + 4)
-    return (hi << 32) | lo
-}
+function fdt_read64_be with long addr
+    a hi
+    a lo
+    a tmp
+    a result
+
+    call fdt_read32_be addr
+    store it into hi
+    add addr 4
+    store it into tmp
+    call fdt_read32_be tmp
+    store it into lo
+    shift hi 32
+    store it into result
+    bitor result lo
+    store it into result
+    return result
+end
 
 # ----------------------------------------------------------------------------
 # Initialize the parser from a physical DTB address.
 # Returns 0 on success, 1 if the magic is wrong or the header is out of bounds.
 # ----------------------------------------------------------------------------
-func fdt_init(dtb_phys: u64) -> u32 {
-    fdt_base = dtb_phys
-    let magic: u32 = fdt_read32_be(dtb_phys)
-    if magic != FDT_MAGIC {
-        fdt_base = 0
-        return 1
-    }
+function fdt_init with long dtb_phys
+    a magic
+    a totalsize
+    a tmp
+    a off_dt_struct
+    a off_dt_strings
+    a size_dt_strings
+    a size_dt_struct
 
-    let totalsize: u32 = fdt_read32_be(dtb_phys + 4)
+    store dtb_phys into fdt_base
+    call fdt_read32_be dtb_phys
+    store it into magic
+    if compare magic FDT_MAGIC
+        store 0 into fdt_base
+        return 1
+    end
+
+    add dtb_phys 4
+    store it into tmp
+    call fdt_read32_be tmp
+    store it into totalsize
 
     # The fixed FDT header is 40 bytes long. Reject any image that does not
     # even contain the full header before reading the remaining fields.
-    if totalsize < 40 {
-        fdt_base = 0
+    if less totalsize 40
+        store 0 into fdt_base
         return 1
-    }
+    end
 
-    let off_dt_struct: u32 = fdt_read32_be(dtb_phys + 8)
-    let off_dt_strings: u32 = fdt_read32_be(dtb_phys + 12)
-    let size_dt_strings: u32 = fdt_read32_be(dtb_phys + 32)
-    let size_dt_struct: u32 = fdt_read32_be(dtb_phys + 36)
+    add dtb_phys 8
+    store it into tmp
+    call fdt_read32_be tmp
+    store it into off_dt_struct
+    add dtb_phys 12
+    store it into tmp
+    call fdt_read32_be tmp
+    store it into off_dt_strings
+    add dtb_phys 32
+    store it into tmp
+    call fdt_read32_be tmp
+    store it into size_dt_strings
+    add dtb_phys 36
+    store it into tmp
+    call fdt_read32_be tmp
+    store it into size_dt_struct
 
     # Basic bounds validation: all header offsets and block sizes must lie
     # inside the DTB image described by totalsize. These checks catch
     # truncated or corrupt DTBs early, before the token walker reads past
-    # the DTB boundary. The additive checks are written in overflow-safe
-    # form (a + b <= c is tested as a > c - b after confirming b <= c).
-    if off_dt_struct >= totalsize {
-        fdt_base = 0
+    # the DTB boundary. (a >= b is tested as the two separate cases
+    # a > b and a == b.)
+    if greater off_dt_struct totalsize
+        store 0 into fdt_base
         return 1
-    }
-    if off_dt_strings >= totalsize {
-        fdt_base = 0
+    end
+    if equal off_dt_struct totalsize
+        store 0 into fdt_base
         return 1
-    }
-    if size_dt_strings > totalsize {
-        fdt_base = 0
+    end
+    if greater off_dt_strings totalsize
+        store 0 into fdt_base
         return 1
-    }
-    if size_dt_struct > totalsize {
-        fdt_base = 0
+    end
+    if equal off_dt_strings totalsize
+        store 0 into fdt_base
         return 1
-    }
-    if off_dt_strings > totalsize - size_dt_strings {
-        fdt_base = 0
+    end
+    if greater size_dt_strings totalsize
+        store 0 into fdt_base
         return 1
-    }
-    if off_dt_struct > totalsize - size_dt_struct {
-        fdt_base = 0
+    end
+    if greater size_dt_struct totalsize
+        store 0 into fdt_base
         return 1
-    }
+    end
+    subtract totalsize size_dt_strings
+    store it into tmp
+    if greater off_dt_strings tmp
+        store 0 into fdt_base
+        return 1
+    end
+    subtract totalsize size_dt_struct
+    store it into tmp
+    if greater off_dt_struct tmp
+        store 0 into fdt_base
+        return 1
+    end
 
-    fdt_struct_off = off_dt_struct
-    fdt_strings_off = off_dt_strings
-    fdt_struct_size = size_dt_struct
+    store off_dt_struct into fdt_struct_off
+    store off_dt_strings into fdt_strings_off
+    store size_dt_struct into fdt_struct_size
     return 0
-}
+end
 
 # ----------------------------------------------------------------------------
 # Compare two NUL-terminated strings.
 # Returns 1 if equal, 0 otherwise.
 # ----------------------------------------------------------------------------
-func fdt_streq(a: u64, b: u64) -> u32 {
-    let i: u64 = 0
-    while true {
-        let ca: u8 = read8(a + i)
-        let cb: u8 = read8(b + i)
-        if ca != cb {
+function fdt_streq with long stra with long strb
+    a i
+    a ptra
+    a ptrb
+    a ca
+    a cb
+
+    store 0 into i
+    while true
+        add stra i
+        store it into ptra
+        call mmio_read8 ptra
+        store it into ca
+        add strb i
+        store it into ptrb
+        call mmio_read8 ptrb
+        store it into cb
+        if compare ca cb
             return 0
-        }
-        if ca == 0 {
+        end
+        if equal ca 0
             return 1
-        }
-        i = i + 1
-    }
+        end
+        add i 1
+        store it into i
+    end
     return 0
-}
+end
 
 # ----------------------------------------------------------------------------
 # Length of a NUL-terminated string.
 # ----------------------------------------------------------------------------
-func fdt_strlen(s: u64) -> u64 {
-    let len: u64 = 0
-    while read8(s + len) != 0 {
-        len = len + 1
-    }
+function fdt_strlen with long s
+    a len
+    a ptr
+    a ch
+
+    store 0 into len
+    store 1 into ch
+    while compare ch 0
+        add s len
+        store it into ptr
+        call mmio_read8 ptr
+        store it into ch
+        if compare ch 0
+            add len 1
+            store it into len
+        end
+    end
     return len
-}
+end
 
 # ----------------------------------------------------------------------------
 # Skip a NUL-terminated, 4-byte aligned name that follows a token.
 # ----------------------------------------------------------------------------
-func fdt_skip_name(p: u64) -> u64 {
-    let len: u64 = fdt_strlen(p)
-    let total: u64 = len + 1
-    while (total & 3) != 0 {
-        total = total + 1
-    }
-    return p + total
-}
+function fdt_skip_name with long p
+    a len
+    a total
+    a rem
+
+    call fdt_strlen p
+    store it into len
+    add len 1
+    store it into total
+
+    store 1 into rem
+    while compare rem 0
+        bitand total 3
+        store it into rem
+        if compare rem 0
+            add total 1
+            store it into total
+        end
+    end
+
+    add p total
+    store it into total
+    return total
+end
 
 # ----------------------------------------------------------------------------
 # Find the first node whose 'compatible' property contains the requested
 # compatible string. Returns the absolute address of the node's FDT_BEGIN_NODE
 # token, or 0 if not found.
 # ----------------------------------------------------------------------------
-func fdt_find_node(compatible: u64) -> u64 {
-    let base: u64 = fdt_base
-    if base == 0 {
-        return 0
-    }
-    let p: u64 = base + fdt_struct_off
-    let end: u64 = p + fdt_struct_size
-    let current_node: u64 = 0
+function fdt_find_node with long compatible
+    a base
+    a p
+    a struct_end
+    a current_node
+    a token
+    a len
+    a nameoff
+    a data
+    a name
+    a tmp
+    a streq_result
+    a offset
+    a cand
+    a sublen
+    a next
+    a align_rem
 
-    while p < end {
-        let token: u32 = fdt_read32_be(p)
-        if token == FDT_BEGIN_NODE {
-            current_node = p
-            p = fdt_skip_name(p + 4)
-        } else if token == FDT_END_NODE {
-            current_node = 0
-            p = p + 4
-        } else if token == FDT_PROP {
-            let len: u32 = fdt_read32_be(p + 4)
-            let nameoff: u32 = fdt_read32_be(p + 8)
-            let data: u64 = p + 12
-            let name: u64 = base + fdt_strings_off + nameoff
-            if current_node != 0 {
-                if fdt_streq(name, "compatible") == 1 {
-                    let offset: u64 = 0
-                    while offset < len {
-                        let cand: u64 = data + offset
-                        if fdt_streq(cand, compatible) == 1 {
-                            return current_node
-                        }
-                        let sublen: u64 = fdt_strlen(cand)
-                        if sublen == 0 {
-                            offset = len
-                        } else {
-                            offset = offset + sublen + 1
-                        }
-                    }
-                }
-            }
-            let next: u64 = p + 12 + len
-            while ((next - base - fdt_struct_off) & 3) != 0 {
-                next = next + 1
-            }
-            p = next
-        } else if token == FDT_NOP {
-            p = p + 4
-        } else if token == FDT_END {
-            return 0
-        } else {
-            return 0
-        }
-    }
+    store fdt_base into base
+    if equal base 0
+        return 0
+    end
+    add base fdt_struct_off
+    store it into p
+    add p fdt_struct_size
+    store it into struct_end
+    store 0 into current_node
+
+    while less p struct_end
+        call fdt_read32_be p
+        store it into token
+
+        if equal token FDT_BEGIN_NODE
+            store p into current_node
+            add p 4
+            store it into tmp
+            call fdt_skip_name tmp
+            store it into p
+        else
+            if equal token FDT_END_NODE
+                store 0 into current_node
+                add p 4
+                store it into p
+            else
+                if equal token FDT_PROP
+                    add p 4
+                    store it into tmp
+                    call fdt_read32_be tmp
+                    store it into len
+                    add p 8
+                    store it into tmp
+                    call fdt_read32_be tmp
+                    store it into nameoff
+                    add p 12
+                    store it into data
+                    add base fdt_strings_off
+                    add it nameoff
+                    store it into name
+                    if compare current_node 0
+                        call fdt_streq name "compatible"
+                        store it into streq_result
+                        if equal streq_result 1
+                            store 0 into offset
+                            while less offset len
+                                add data offset
+                                store it into cand
+                                call fdt_streq cand compatible
+                                store it into streq_result
+                                if equal streq_result 1
+                                    return current_node
+                                end
+                                call fdt_strlen cand
+                                store it into sublen
+                                if equal sublen 0
+                                    store len into offset
+                                else
+                                    add offset sublen
+                                    add it 1
+                                    store it into offset
+                                end
+                            end
+                        end
+                    end
+                    add p 12
+                    add it len
+                    store it into next
+                    store 1 into align_rem
+                    while compare align_rem 0
+                        subtract next base
+                        subtract it fdt_struct_off
+                        bitand it 3
+                        store it into align_rem
+                        if compare align_rem 0
+                            add next 1
+                            store it into next
+                        end
+                    end
+                    store next into p
+                else
+                    if equal token FDT_NOP
+                        add p 4
+                        store it into p
+                    else
+                        if equal token FDT_END
+                            return 0
+                        else
+                            return 0
+                        end
+                    end
+                end
+            end
+        end
+    end
     return 0
-}
+end
 
 # ----------------------------------------------------------------------------
 # Read the idx-th (addr, size) pair from the node's 'reg' property.
@@ -249,58 +427,123 @@ func fdt_find_node(compatible: u64) -> u64 {
 # Writes the pair to the addresses given by out_addr and out_size.
 # Returns 0 on success.
 # ----------------------------------------------------------------------------
-func fdt_get_reg(node: u64, idx: u32, out_addr: u64, out_size: u64) -> u32 {
-    let base: u64 = fdt_base
-    if base == 0 {
-        return 1
-    }
-    if node == 0 {
-        return 1
-    }
-    let p: u64 = node + 4
-    p = fdt_skip_name(p)
-    let depth: u32 = 0
+function fdt_get_reg with long node with long idx with long out_addr with long out_size
+    a base
+    a p
+    a depth
+    a token
+    a len
+    a nameoff
+    a data
+    a name
+    a tmp
+    a streq_result
+    a pair_size
+    a offset
+    a total
+    a addr
+    a size
+    a next
+    a align_rem
 
-    while true {
-        let token: u32 = fdt_read32_be(p)
-        if token == FDT_END_NODE {
-            if depth == 0 {
+    store fdt_base into base
+    if equal base 0
+        return 1
+    end
+    if equal node 0
+        return 1
+    end
+    add node 4
+    store it into tmp
+    call fdt_skip_name tmp
+    store it into p
+    store 0 into depth
+
+    while true
+        call fdt_read32_be p
+        store it into token
+        if equal token FDT_END_NODE
+            if equal depth 0
                 return 1
-            }
-            depth = depth - 1
-            p = p + 4
-        } else if token == FDT_PROP {
-            let len: u32 = fdt_read32_be(p + 4)
-            let nameoff: u32 = fdt_read32_be(p + 8)
-            let data: u64 = p + 12
-            let name: u64 = base + fdt_strings_off + nameoff
-            if depth == 0 {
-                if fdt_streq(name, "reg") == 1 {
-                    let pair_size: u64 = 16
-                    let offset: u64 = idx * pair_size
-                    if offset + pair_size > len {
+            end
+            subtract depth 1
+            store it into depth
+            add p 4
+            store it into p
+        else
+            if equal token FDT_PROP
+                add p 4
+                store it into tmp
+                call fdt_read32_be tmp
+                store it into len
+                add p 8
+                store it into tmp
+                call fdt_read32_be tmp
+                store it into nameoff
+                add p 12
+                store it into data
+                add base fdt_strings_off
+                add it nameoff
+                store it into name
+                if equal depth 0
+                    call fdt_streq name "reg"
+                    store it into streq_result
+                    if equal streq_result 1
+                        store 16 into pair_size
+                        multiply idx pair_size
+                        store it into offset
+                        add offset pair_size
+                        store it into total
+                        if greater total len
+                            return 1
+                        end
+                        add data offset
+                        store it into tmp
+                        call fdt_read64_be tmp
+                        store it into addr
+                        add data offset
+                        add it 8
+                        store it into tmp
+                        call fdt_read64_be tmp
+                        store it into size
+                        call mmio_write64 out_addr addr
+                        call mmio_write64 out_size size
+                        return 0
+                    end
+                end
+                add p 12
+                add it len
+                store it into next
+                store 1 into align_rem
+                while compare align_rem 0
+                    subtract next base
+                    subtract it fdt_struct_off
+                    bitand it 3
+                    store it into align_rem
+                    if compare align_rem 0
+                        add next 1
+                        store it into next
+                    end
+                end
+                store next into p
+            else
+                if equal token FDT_BEGIN_NODE
+                    add depth 1
+                    store it into depth
+                    add p 4
+                    store it into tmp
+                    call fdt_skip_name tmp
+                    store it into p
+                else
+                    if equal token FDT_NOP
+                        add p 4
+                        store it into p
+                    else
                         return 1
-                    }
-                    let addr: u64 = fdt_read64_be(data + offset)
-                    let size: u64 = fdt_read64_be(data + offset + 8)
-                    write64(out_addr, addr)
-                    write64(out_size, size)
-                    return 0
-                }
-            }
-            let next: u64 = p + 12 + len
-            while ((next - base - fdt_struct_off) & 3) != 0 {
-                next = next + 1
-            }
-            p = next
-        } else if token == FDT_BEGIN_NODE {
-            depth = depth + 1
-            p = fdt_skip_name(p + 4)
-        } else if token == FDT_NOP {
-            p = p + 4
-        } else {
-            return 1
-        }
-    }
+                    end
+                end
+            end
+        end
+    end
     return 1
-}
+end

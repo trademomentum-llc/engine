@@ -45,7 +45,7 @@ global SYS_EXEC      int   # 16 — execute a program
 # In a real implementation these would be assembler equates; here we
 # use globals for documentation and introspection.
 # ---------------------------------------------------------------------------
-function numbers_init:
+function numbers_init
     store 0  into SYS_EXIT
     store 1  into SYS_FORK
     store 2  into SYS_YIELD
@@ -83,7 +83,8 @@ function numbers_init:
 # sole controlled entry point from unprivileged user code into the
 # kernel.  All arguments must be validated before use.
 # ---------------------------------------------------------------------------
-function syscall_dispatch:
+end
+function syscall_dispatch
     # -------------------------------------------------------------------
     # Save all general-purpose registers on the kernel stack so the
     # interrupted process context is fully preserved.
@@ -286,7 +287,8 @@ function syscall_dispatch:
 #
 # Returns: value from the kernel handler (via RAX).
 # ---------------------------------------------------------------------------
-function syscall0:
+end
+function syscall0
     a num
     # rax = num
     # int 0x80
@@ -302,7 +304,8 @@ function syscall0:
 #
 # Returns: value from the kernel handler (via RAX).
 # ---------------------------------------------------------------------------
-function syscall1:
+end
+function syscall1
     a num
     a a
     # rax = num; rdi = a
@@ -320,7 +323,8 @@ function syscall1:
 #
 # Returns: value from the kernel handler (via RAX).
 # ---------------------------------------------------------------------------
-function syscall2:
+end
+function syscall2
     a num
     a a
     a b
@@ -340,7 +344,8 @@ function syscall2:
 #
 # Returns: value from the kernel handler (via RAX).
 # ---------------------------------------------------------------------------
-function syscall3:
+end
+function syscall3
     a num
     a a
     a b
@@ -368,7 +373,8 @@ function syscall3:
 # This function does NOT return.  It calls process_exit which
 # cleans up the process and switches to another ready process.
 # ---------------------------------------------------------------------------
-function sys_exit:
+end
+function sys_exit
     a code
 
     # Store the exit code in the current process's control block
@@ -398,7 +404,8 @@ function sys_exit:
 # Returns in child:  0
 # Returns on error:  -1
 # ---------------------------------------------------------------------------
-function sys_fork:
+end
+function sys_fork
     # Use the copy-on-write fork implementation.
     # This creates a child process that shares read-only page tables
     # with the parent until one of them writes.
@@ -415,8 +422,9 @@ function sys_fork:
 #
 # Returns: always 0.
 # ---------------------------------------------------------------------------
-function sys_yield:
-    call yield
+end
+function sys_yield
+    call yield_cpu
     return 0
 
 
@@ -432,7 +440,8 @@ function sys_yield:
 #
 # Returns: 0 on success, negative error code on failure.
 # ---------------------------------------------------------------------------
-function sys_send:
+end
+function sys_send
     a dest
     a buf
     a size
@@ -473,7 +482,8 @@ function sys_send:
 #
 # Returns: number of bytes received, or negative error code.
 # ---------------------------------------------------------------------------
-function sys_recv:
+end
+function sys_recv
     a buf
     a max_size
 
@@ -509,7 +519,8 @@ function sys_recv:
 #
 # Returns: always 0.
 # ---------------------------------------------------------------------------
-function sys_sleep:
+end
+function sys_sleep
     a ticks
 
     # Zero or negative sleep is a no-op
@@ -527,7 +538,8 @@ function sys_sleep:
 #
 # Returns: PID of the calling process.
 # ---------------------------------------------------------------------------
-function sys_getpid:
+end
+function sys_getpid
     call get_current_pid
     return it
 
@@ -542,7 +554,8 @@ function sys_getpid:
 #
 # Returns: always 0.
 # ---------------------------------------------------------------------------
-function sys_puts:
+end
+function sys_puts
     a str
     a idx
     a ch
@@ -600,7 +613,8 @@ function sys_puts:
 #
 # Returns: new heap end on success, 0 on failure.
 # ---------------------------------------------------------------------------
-function sys_brk:
+end
+function sys_brk
     a new_end
     a current_slot
     a current_heap_end
@@ -712,7 +726,8 @@ function sys_brk:
 #
 # Returns: 0 on success, -1 if target not found.
 # ---------------------------------------------------------------------------
-function sys_kill:
+end
+function sys_kill
     a pid
 
     # Cannot kill the idle process (PID 0) or init (PID 1)
@@ -747,7 +762,8 @@ function sys_kill:
 #
 # Returns: tick count (unsigned long).
 # ---------------------------------------------------------------------------
-function sys_getticks:
+end
+function sys_getticks
     load tick_count
     return it
 
@@ -760,7 +776,8 @@ function sys_getticks:
 #
 # Returns: file descriptor on success, -1 on error.
 # ---------------------------------------------------------------------------
-function sys_open:
+end
+function sys_open
     a name
     a mode
 
@@ -785,7 +802,8 @@ function sys_open:
 #
 # Returns: bytes read, or -1 on error.
 # ---------------------------------------------------------------------------
-function sys_read:
+end
+function sys_read
     a fd
     a buf
     a count
@@ -813,7 +831,8 @@ function sys_read:
 #
 # Returns: bytes written, or -1 on error.
 # ---------------------------------------------------------------------------
-function sys_write:
+end
+function sys_write
     a fd
     a buf
     a count
@@ -839,7 +858,8 @@ function sys_write:
 #
 # Returns: 0 on success, -1 on error.
 # ---------------------------------------------------------------------------
-function sys_close:
+end
+function sys_close
     a fd
 
     call vfs_close fd
@@ -851,7 +871,8 @@ function sys_close:
 #
 # Returns: number of files listed.
 # ---------------------------------------------------------------------------
-function sys_list:
+end
+function sys_list
     call vfs_list
     return 0
 
@@ -867,7 +888,8 @@ function sys_list:
 #
 # Returns: entry point address on success, -1 on error.
 # ---------------------------------------------------------------------------
-function sys_exec:
+end
+function sys_exec
     a path
     a temp_buf
     a bytes_read
@@ -939,7 +961,8 @@ function sys_exec:
 #
 # Called once during kernel initialization.
 # ---------------------------------------------------------------------------
-function syscall_init:
+end
+function syscall_init
     # Install int 0x80 handler in the IDT at vector 0x80
     # idt_set_gate(0x80, syscall_handler_asm, 0x08, 0x8E);
     # (In real code this would be an assembly stub that saves state
@@ -954,3 +977,4 @@ function syscall_init:
     call numbers_init
     print "SYSCALL: system call interface initialized (int 0x80)"
     return 0
+end

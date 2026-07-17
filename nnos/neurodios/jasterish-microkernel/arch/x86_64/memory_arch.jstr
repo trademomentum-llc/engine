@@ -1845,6 +1845,20 @@ end
 # ----------------------------------------------------------------------------
 
 # ----------------------------------------------------------------------------
+# Function: arch_store_stack_entry
+# Parameters: stack_top, entry_point
+# Description:
+#   Store a 64-bit value at [stack_top - 8]. Used during process creation to
+#   push the initial entry point onto a fresh kernel stack.
+# ----------------------------------------------------------------------------
+function arch_store_stack_entry with long stack_top with long entry_point
+    store stack_top into register rdi
+    store entry_point into register rsi
+    inline "mov [rdi-8], rsi"
+    return 0
+end
+
+# ----------------------------------------------------------------------------
 # Function: arch_save_context
 # Parameters: pcb -- process slot index
 # Description:

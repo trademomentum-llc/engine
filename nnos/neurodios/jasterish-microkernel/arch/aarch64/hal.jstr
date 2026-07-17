@@ -1,6 +1,6 @@
-# ============================================================================
+###############################################################################
 # hal.jstr -- AArch64 Hardware Abstraction Layer top-level
-# ============================================================================
+###############################################################################
 # Orchestrates architecture initialization and provides the generic kernel
 # interface expected by arch-independent code.
 #
@@ -8,13 +8,9 @@
 #   arch_init(dtb_ptr)    -- initialize UART, GIC, exceptions, timer
 #   arch_irq_enable()     -- unmask IRQs at the CPU
 #   arch_irq_disable()    -- mask IRQs at the CPU
+#   arch_halt()           -- wait for the next interrupt (WFE)
 #   arch_panic(msg)       -- print a message and halt forever
-#   kernel_main()         -- common kernel entry point
-#   schedule()            -- scheduler stub used by the timer handler
-#
-# Built-ins assumed from the AArch64 JStar backend:
-#   mrs(sysreg), msr(sysreg, value), wfe, read8(addr)
-# ============================================================================
+###############################################################################
 
 # ----------------------------------------------------------------------------
 # Physical DTB address passed by the bootloader.
@@ -25,111 +21,134 @@ store 0 into dtb_phys_addr
 # ----------------------------------------------------------------------------
 # Enable and disable IRQs/FIQs at the CPU by manipulating DAIF.
 # ----------------------------------------------------------------------------
-func arch_irq_enable() {
-    msr(DAIFClr, 0xF)
-    isb()
-    return
-}
+function arch_irq_enable
+    inline "daifclr 0xF"
+    inline "isb"
+    return 0
+end
 
-func arch_irq_disable() {
-    msr(DAIFSet, 0xF)
-    isb()
-    return
-}
+function arch_irq_disable
+    inline "daifset 0xF"
+    inline "isb"
+    return 0
+end
 
 # ----------------------------------------------------------------------------
 # Wait for the next interrupt (WFE on AArch64).
 # ----------------------------------------------------------------------------
-func arch_halt() {
-    wfe
-    return
-}
+function arch_halt
+    inline "wfe"
+    return 0
+end
 
 # ----------------------------------------------------------------------------
 # Print a NUL-terminated string over the PL011, one character at a time.
 # ----------------------------------------------------------------------------
-func arch_print_string(msg: u64) {
-    let p: u64 = msg
-    while true {
-        let ch: u8 = read8(p)
-        if ch == 0 {
-            return
-        }
-        call arch_putc ch
-        p = p + 1
-    }
-    return
-}
+function arch_print_string with long msg
+    call serial_puts msg
+    return 0
+end
 
 # ----------------------------------------------------------------------------
 # Kernel panic: report the failure and halt.
 # ----------------------------------------------------------------------------
-func arch_panic(msg: u64) {
+function arch_panic with long msg
     call arch_irq_disable
 
     # Print a banner and the caller-provided message.
-    call arch_print_string "\n!!! KERNEL PANIC: "
-    call arch_print_string msg
-    call arch_print_string "\n"
+    call serial_puts "\n!!! KERNEL PANIC: "
+    call serial_puts msg
+    call serial_puts "\n"
 
     # Halt forever with interrupts disabled.
-    while true {
-        wfe
-    }
+    while true
+        inline "wfe"
+    end
 
-    return
-}
-
-# ----------------------------------------------------------------------------
-# (schedule() and kernel_main() are provided by common/process.jstr and
-# common/kernel.jstr respectively once the compiler can link the full kernel.)
+    return 0
+end
 
 # ----------------------------------------------------------------------------
 # Architecture initialization override for FDT-aware bring-up.
 # Called from _start in boot.jstr.
 # ----------------------------------------------------------------------------
-func arch_init(dtb_ptr: u64) {
-    dtb_phys_addr = dtb_ptr
+function arch_init with long dtb_ptr
+    a fdt_ok
+    a freq
+    a node_tmp
+
+    store dtb_ptr into dtb_phys_addr
 
     # Initialize the DTB parser. If the DTB is missing or corrupt, leave
     # fdt_ok non-zero so we fall back to the hard-coded QEMU defaults below.
-    let fdt_ok: u32 = fdt_init(dtb_ptr)
+    call fdt_init dtb_ptr
+    store it into fdt_ok
 
     # Register all known drivers (QEMU 'virt' and Pixel/Tensor G4 stubs).
     call hal_register_qemu_drivers
     call hal_register_pixel_stubs
 
     # Attempt FDT-driven driver initialization.
-    if fdt_ok == 0 {
+    if equal fdt_ok 0
         call hal_init_from_fdt
-    }
+    end
 
     # Fallback for QEMU 'virt' when the DTB is missing, invalid, or does not
     # contain the expected device nodes. On real hardware these devices are
     # discovered and initialized via the FDT driver registry above, so this
     # path is effectively QEMU-only.
-    if fdt_ok != 0 {
+    if compare fdt_ok 0
         call uart_init
         call gic_init
-    } else {
-        if fdt_find_node("arm,pl011") == 0 {
+    else
+        call fdt_find_node "arm,pl011"
+        store it into node_tmp
+        if equal node_tmp 0
             call uart_init
-        }
-        if fdt_find_node("arm,cortex-a15-gic") == 0 {
+        end
+        call fdt_find_node "arm,cortex-a15-gic"
+        store it into node_tmp
+        if equal node_tmp 0
             # Only fall back to GICv2 if the DTB does not describe a GICv3.
             # This keeps QEMU 'virt' working while avoiding spurious GICv2
             # setup on boards that use GICv3 (e.g. Pixel/Tensor G4).
-            if fdt_find_node("arm,gic-v3") == 0 {
+            call fdt_find_node "arm,gic-v3"
+            store it into node_tmp
+            if equal node_tmp 0
                 call gic_init
-            }
-        }
-    }
+            end
+        end
+    end
 
     call exceptions_init
 
     # Use the counter frequency for the timer initialization.
-    let freq: u64 = mrs(CNTFRQ_EL0)
+    inline "mrs x0, cntfrq_el0"
+    store register x0 into freq
     call arch_timer_init freq
 
-    return
-}
+    return 0
+end
+
+# ----------------------------------------------------------------------------
+# Compatibility shims for arch-independent kernel code.
+# ----------------------------------------------------------------------------
+
+# x86_64 installs its IDT here; on AArch64 the equivalent is the VBAR_EL1
+# vector table. Reinstalling is idempotent.
+function idt_init
+    call exceptions_init
+    return 0
+end
+
+# On x86_64 this probes the ATA disk and keyboard. The AArch64 port has no
+# platform devices to probe here; the UART/GIC/timer are set up by arch_init.
+function drivers_init
+    return 0
+end
+
+# Arch-neutral panic entry point used by common code.
+function panic
+    call arch_panic "kernel panic"
+    return 0
+end

@@ -59,7 +59,7 @@ store "portable" into kernel_arch
 # Phase 8: Enable interrupts and start scheduling
 ###############################################################################
 
-kernel_main
+function kernel_main
     a mb_ptr
 
     # Receive multiboot info pointer from boot module
@@ -183,10 +183,13 @@ kernel_main
     print "[kernel] Phase 7: Creating init process..."
 
     a init_pid
-    call process_create init_function 5
+    a init_entry
+    addressof init_function
+    store it into init_entry
+    call process_create init_entry 5
     store it into init_pid
 
-    if compare init_pid -1
+    if equal init_pid -1
         print "[kernel] FATAL: Failed to create init process!"
         call arch_panic "init process creation failed"
     end
@@ -234,22 +237,23 @@ kernel_main
 # which is called from pit_handler every 10ms.
 ###############################################################################
 
-scheduler_loop
+end
+function scheduler_loop
     # The scheduler loop runs forever
-    while 1 greater 0
+    while greater 1 0
         # Check if the ready queue has any processes
         a has_ready
         call ready_queue_not_empty
         store it into has_ready
 
-        if compare has_ready 1
+        if equal has_ready 1
             # There is at least one ready process.
             # Dequeue it and switch to it.
             a next_proc
             call dequeue_ready
             store it into next_proc
 
-            if greater_or_equal next_proc 0
+            if greater next_proc -1
                 # Valid process index -- switch to it
                 call switch_to next_proc
             end
@@ -271,7 +275,8 @@ scheduler_loop
 # Returns: 1 if the queue is not empty, 0 if empty.
 ###############################################################################
 
-ready_queue_not_empty
+end
+function ready_queue_not_empty
     a head_val
     load ready_head
     store it into head_val
@@ -295,7 +300,8 @@ ready_queue_not_empty
 # This is called when no process is ready to run.
 ###############################################################################
 
-cpu_idle_step
+end
+function cpu_idle_step
     # Enable interrupts so the next timer/keyboard interrupt wakes us.
     call arch_irq_enable
 
@@ -314,6 +320,7 @@ cpu_idle_step
 # Returns: PID of the user process, or -1 on failure.
 ###############################################################################
 
+end
 function init_user_process
     a code_phys
     a code_virt
@@ -329,8 +336,7 @@ function init_user_process
     store it into code_phys
 
     load code_phys
-    load 0
-    if equal it it
+    if equal it 0
         print "[init] Failed to allocate user code page"
         return -1
     end
@@ -346,8 +352,7 @@ function init_user_process
     store it into user_pid
 
     load user_pid
-    load -1
-    if equal it it
+    if equal it -1
         print "[init] Failed to create user process"
         call pmm_free code_phys
         return -1
@@ -377,7 +382,7 @@ end
 # for all kernel interactions.
 ###############################################################################
 
-init_function
+function init_function
     # Print init process startup banner
     print ""
     print "[init] Process started (PID 1)"
@@ -388,7 +393,8 @@ init_function
     # Create a child process that demonstrates IPC
     print "[init] Starting counter demo process..."
     a child_pid
-    call process_create counter_demo 3
+    addressof counter_demo
+    call process_create it 3
     store it into child_pid
 
     if greater child_pid 0
@@ -424,7 +430,8 @@ init_function
 # init process (PID 1) via IPC.
 ###############################################################################
 
-counter_demo
+end
+function counter_demo
     print "[counter] Counter demo process started"
 
     a counter
@@ -475,23 +482,26 @@ counter_demo
 #   quit    -- Exit the shell
 ###############################################################################
 
-shell_loop
-    # Print shell prompt
+end
+function shell_loop
+    # Print shell prompt and enter the interactive read loop.
     print "JMK> "
+    call shell_read_loop
+end
 
+function shell_read_loop
     # Buffer for a single command line
     array 64 cmd_buf
     a cmd_len
     store 0 into cmd_len
 
-shell_read_loop
     # Read a character from the console (non-blocking, arch-neutral).
     call arch_getc
     store it into a ch
 
-    # If no character available (0 or -1), yield and try again.
+    # If no character available (0 or -1), yield_cpu and try again.
     if less_or_equal ch 0
-        call yield
+        call yield_cpu
         jump shell_read_loop
     end
 
@@ -547,14 +557,8 @@ shell_read_loop
 # cmd_len: length of the command string
 ###############################################################################
 
-process_command
-    a cmd_buf
-    a cmd_len
-
-    # Save parameters
-    store it into cmd_len
-    store it into cmd_buf
-
+end
+function process_command with int cmd_buf with int cmd_len
     # Handle empty command
     if equal cmd_len 0
         return 0
@@ -685,7 +689,8 @@ process_command
 # Display the help message listing available shell commands.
 ###############################################################################
 
-cmd_help
+end
+function cmd_help
     print ""
     print "=== JMK Shell Commands ==="
     print "  help   -- Show this help message"
@@ -706,7 +711,8 @@ cmd_help
 # Display a list of running processes.
 ###############################################################################
 
-cmd_ps
+end
+function cmd_ps
     print ""
     print "=== Process Table ==="
     print "  PID  State     Parent"
@@ -714,7 +720,7 @@ cmd_ps
     a slot
     store 0 into slot
 
-    for slot from 0 to MAX_PROCS
+    while less slot MAX_PROCS
         # Skip unused slots for cleaner output
         a state
         load proc_state at slot
@@ -751,6 +757,11 @@ cmd_ps
             call serial_print_dec parent
             print ""
         end
+
+        # slot++
+        load slot
+        add it 1
+        store it into slot
     end
 
     print ""
@@ -762,7 +773,8 @@ cmd_ps
 # Display the current system uptime in timer ticks.
 ###############################################################################
 
-cmd_tick
+end
+function cmd_tick
     a ticks
     load tick_count
     store it into ticks
@@ -780,7 +792,8 @@ cmd_tick
 # Display memory statistics from the PMM and heap.
 ###############################################################################
 
-cmd_mem
+end
+function cmd_mem
     print ""
     print "=== Memory Statistics ==="
 
@@ -809,7 +822,8 @@ cmd_mem
 # Skips the "echo" prefix (5 characters) and prints the rest.
 ###############################################################################
 
-cmd_echo
+end
+function cmd_echo
     a cmd_buf
     a cmd_len
     a idx
@@ -839,7 +853,8 @@ cmd_echo
 # List files in the virtual filesystem.
 ###############################################################################
 
-cmd_ls
+end
+function cmd_ls
     call vfs_list
     return 0
 
@@ -850,7 +865,8 @@ cmd_ls
 # Parses the filename after "cat " (4 characters).
 ###############################################################################
 
-cmd_cat
+end
+function cmd_cat
     a cmd_buf
     a cmd_len
     a filename
@@ -928,7 +944,8 @@ cmd_cat
 # Sync the virtual filesystem to disk.
 ###############################################################################
 
-cmd_sync
+end
+function cmd_sync
     call vfs_sync_to_disk
     return 0
 
@@ -939,7 +956,8 @@ cmd_sync
 # This validates that PMM, VMM, heap, IPC, and scheduling are working.
 ###############################################################################
 
-kernel_self_test
+end
+function kernel_self_test
     print "[kernel] Running self-test..."
 
     # Test 1: PMM alloc/free
@@ -1005,3 +1023,4 @@ kernel_self_test
 # Total modules: 7 source files, ~7500 lines of Jasterish code
 # Architecture: Micro-kernel with message-passing IPC
 ###############################################################################
+end

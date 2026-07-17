@@ -1,17 +1,18 @@
-# ============================================================================
+###############################################################################
 # uart.jstr -- AArch64 PL011 UART driver
-# ============================================================================
+###############################################################################
 # Provides polled serial input/output for the Jasterish Micro-Kernel AArch64
 # port on QEMU 'virt' (PL011 at 0x09000000).
 #
 # Public interface:
-#   uart_init()        -- configure the UART for 115200 8N1
-#   arch_putc(c: u8)   -- transmit one character
-#   arch_getc() -> u64 -- receive one character, or 0xFFFFFFFFFFFFFFFF if none
-#
-# Built-ins assumed from the AArch64 JStar backend:
-#   read32(addr), write32(addr, value)
-# ============================================================================
+#   uart_init()           -- configure the UART for 115200 8N1
+#   arch_putc(c)          -- transmit one character
+#   arch_getc() -> long   -- receive one character, or -1 if none
+#   serial_putc(c)        -- arch_putc with CR/LF conversion (common HAL name)
+#   serial_puts(s)        -- print a NUL-terminated string
+#   serial_print_hex(v)   -- print a 64-bit value as 16 hex digits
+#   serial_print_dec(v)   -- print a signed integer as decimal
+###############################################################################
 
 # ----------------------------------------------------------------------------
 # PL011 register offsets and base address
@@ -61,56 +62,264 @@ store 0x200 into UART_CR_RXE     # Receive enable
 # Configure the PL011 for 115200 baud, 8 data bits, no parity, 1 stop bit.
 # QEMU's virt PL011 uses a 24 MHz reference clock.
 # ----------------------------------------------------------------------------
-func uart_init() {
+function uart_init
+    a addr
+    a tmp
+
     # Disable the UART while configuring.
-    write32(UART_BASE + UART_CR, 0)
+    add UART_BASE UART_CR
+    store it into addr
+    call mmio_write32 addr 0
 
     # 24 MHz / (16 * 115200) = 13.0208 -> IBRD=13, FBRD=round(0.0208*64)=1.
-    write32(UART_BASE + UART_IBRD, 13)
-    write32(UART_BASE + UART_FBRD, 1)
+    add UART_BASE UART_IBRD
+    store it into addr
+    call mmio_write32 addr 13
+    add UART_BASE UART_FBRD
+    store it into addr
+    call mmio_write32 addr 1
 
     # Line control: 8-bit word length, FIFOs enabled.
-    write32(UART_BASE + UART_LCR_H, 0x70)
+    add UART_BASE UART_LCR_H
+    store it into addr
+    call mmio_write32 addr 0x70
 
     # Clear any pending interrupts.
-    write32(UART_BASE + UART_ICR, 0xFFFFFFFF)
+    add UART_BASE UART_ICR
+    store it into addr
+    call mmio_write32 addr 0xFFFFFFFF
 
     # Enable UART, transmitter, and receiver.
-    write32(UART_BASE + UART_CR, UART_CR_UARTEN | UART_CR_TXE | UART_CR_RXE)
+    bitor UART_CR_UARTEN UART_CR_TXE
+    store it into tmp
+    bitor tmp UART_CR_RXE
+    store it into tmp
+    add UART_BASE UART_CR
+    store it into addr
+    call mmio_write32 addr tmp
 
-    return
-}
+    return 0
+end
 
 # ----------------------------------------------------------------------------
 # Transmit a single character (blocking poll).
 # ----------------------------------------------------------------------------
-func arch_putc(c: u8) {
-    # Wait until the transmit FIFO is no longer full.
-    while (read32(UART_BASE + UART_FR) & UART_FR_TXFF) != 0 {
-    }
+function arch_putc with long c
+    a addr
+    a fr_val
+    a txff
 
-    write32(UART_BASE + UART_DR, c)
-    return
-}
+    # Wait until the transmit FIFO is no longer full.
+    add UART_BASE UART_FR
+    store it into addr
+    store 1 into txff
+    while compare txff 0
+        call mmio_read32 addr
+        store it into fr_val
+        bitand fr_val UART_FR_TXFF
+        store it into txff
+    end
+
+    add UART_BASE UART_DR
+    store it into addr
+    call mmio_write32 addr c
+    return 0
+end
 
 # ----------------------------------------------------------------------------
 # Receive a single character.  Returns the byte (0-255) or -1 if no data.
 # ----------------------------------------------------------------------------
-func arch_getc() -> u64 {
-    if (read32(UART_BASE + UART_FR) & UART_FR_RXFE) != 0 {
-        return 0xFFFFFFFFFFFFFFFF
-    }
+function arch_getc
+    a addr
+    a fr_val
+    a rxfe
+    a data
+    a ch
 
-    let data: u32 = read32(UART_BASE + UART_DR)
-    let ch: u64 = data & 0xFF
+    add UART_BASE UART_FR
+    store it into addr
+    call mmio_read32 addr
+    store it into fr_val
+    bitand fr_val UART_FR_RXFE
+    store it into rxfe
+    if compare rxfe 0
+        return 0xFFFFFFFFFFFFFFFF
+    end
+
+    add UART_BASE UART_DR
+    store it into addr
+    call mmio_read32 addr
+    store it into data
+    bitand data 0xFF
+    store it into ch
     return ch
-}
+end
+
+# ----------------------------------------------------------------------------
+# serial_putc: arch_putc with carriage-return injection for newlines,
+# matching the x86_64 serial driver interface used by common code.
+# ----------------------------------------------------------------------------
+function serial_putc with long c
+    if equal c 10
+        call arch_putc 13
+    end
+    call arch_putc c
+    return 0
+end
+
+# ----------------------------------------------------------------------------
+# Print a NUL-terminated string, one character at a time.
+# ----------------------------------------------------------------------------
+function serial_puts with long s
+    a idx
+    a ptr
+    a ch
+
+    store 0 into idx
+    store 1 into ch
+    while compare ch 0
+        add s idx
+        store it into ptr
+        call mmio_read8 ptr
+        store it into ch
+        if compare ch 0
+            call serial_putc ch
+            add idx 1
+            store it into idx
+        end
+    end
+    return 0
+end
+
+# ----------------------------------------------------------------------------
+# Print a 64-bit value as hexadecimal with a "0x" prefix.
+# Prints exactly 16 hex digits, including leading zeros.
+# ----------------------------------------------------------------------------
+function serial_print_hex with long value
+    a digits_left
+    a shift_amount
+    a shifted_val
+    a nibble_val
+    a hex_char
+    a hex_temp
+
+    print "0x"
+
+    # Process all 16 nibbles from most significant to least significant.
+    store 16 into digits_left
+    while greater digits_left 0
+        # Compute right shift amount: (16 - digits_left) * 4
+        subtract 16 digits_left
+        multiply it 4
+        store it into shift_amount
+
+        # Shift value right by shift_amount (inline lsr: value may have the
+        # top bit set, so signed divide is not safe here).
+        store value into register x0
+        store shift_amount into register x1
+        inline "lsr x0, x0, x1"
+        store register x0 into shifted_val
+
+        # Mask the low 4 bits to get the nibble value (0-15)
+        bitand shifted_val 0x0F
+        store it into nibble_val
+
+        # Convert nibble (0-15) to ASCII character
+        if less nibble_val 10
+            add 0x30 nibble_val
+            store it into hex_char
+        else
+            add 0x41 nibble_val
+            store it into hex_temp
+            subtract hex_temp 10
+            store it into hex_char
+        end
+
+        call serial_putc hex_char
+
+        subtract digits_left 1
+        store it into digits_left
+    end
+
+    return 0
+end
+
+# ----------------------------------------------------------------------------
+# Print a 32-bit signed integer as decimal text.
+# ----------------------------------------------------------------------------
+function serial_print_dec with long value
+    array 16 digit_buf
+
+    a num_digits
+    a remaining
+    a quotient
+    a product
+    a digit
+    a print_idx
+    a print_count
+    a digit_to_print
+    a ascii_digit
+
+    # Handle negative numbers.
+    if less value 0
+        print "-"
+        subtract 0 value
+        store it into value
+    end
+
+    # Special case: zero.
+    if equal value 0
+        print "0"
+        return 0
+    end
+
+    # Extract digits via repeated division by 10 (stored LSB first).
+    store 0 into num_digits
+    store value into remaining
+    while greater remaining 0
+        divide remaining 10
+        store it into quotient
+
+        multiply quotient 10
+        store it into product
+        subtract remaining product
+        store it into digit
+
+        store digit into digit_buf at num_digits
+
+        add num_digits 1
+        store it into num_digits
+
+        store quotient into remaining
+    end
+
+    # Print digits in reverse order (most significant first).
+    subtract num_digits 1
+    store it into print_idx
+    store num_digits into print_count
+    while greater print_count 0
+        load digit_buf at print_idx
+        store it into digit_to_print
+
+        add 0x30 digit_to_print
+        store it into ascii_digit
+
+        call serial_putc ascii_digit
+
+        subtract print_idx 1
+        store it into print_idx
+        subtract print_count 1
+        store it into print_count
+    end
+
+    return 0
+end
 
 # ----------------------------------------------------------------------------
 # HAL-compatible init wrapper for the PL011.
 # The node parameter is reserved for future DTB-based base-address discovery.
 # ----------------------------------------------------------------------------
-func pl011_init(node: u64) -> u32 {
+function pl011_init with long node
     call uart_init
     return 0
-}
+end

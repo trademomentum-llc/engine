@@ -94,7 +94,7 @@ array 512 ata_sector_buffer
 # Returns: 0 if disk detected, -1 if no disk present.
 ###############################################################################
 
-disk_init
+function disk_init
     a status
     a identify_ok
 
@@ -163,6 +163,7 @@ disk_init
     end
 
     return identify_ok
+end
 
 ###############################################################################
 # Function: disk_select_drive
@@ -171,7 +172,7 @@ disk_init
 # drive: 0 = master, 1 = slave
 ###############################################################################
 
-disk_select_drive
+function disk_select_drive
     a drive
     a drive_head
 
@@ -190,6 +191,7 @@ disk_select_drive
     call disk_io_delay
 
     return 0
+end
 
 ###############################################################################
 # Function: disk_io_delay
@@ -198,7 +200,7 @@ disk_select_drive
 # Required by ATA spec between certain register writes.
 ###############################################################################
 
-disk_io_delay
+function disk_io_delay
     a delay_val
     load from port ATA_PRIMARY_ALT_STATUS
     store it into delay_val
@@ -209,6 +211,7 @@ disk_io_delay
     load from port ATA_PRIMARY_ALT_STATUS
     store it into delay_val
     return 0
+end
 
 ###############################################################################
 # Function: disk_wait_bsy
@@ -217,7 +220,7 @@ disk_io_delay
 # Returns the final status byte, or 0 if timeout.
 ###############################################################################
 
-disk_wait_bsy
+function disk_wait_bsy
     a timeout
     a status
 
@@ -241,6 +244,7 @@ _disk_wait_bsy_loop
     end
 
     jump _disk_wait_bsy_loop
+end
 
 ###############################################################################
 # Function: disk_wait_drq
@@ -250,7 +254,7 @@ _disk_wait_bsy_loop
 # Returns the final status byte, or 0 if timeout/error.
 ###############################################################################
 
-disk_wait_drq
+function disk_wait_drq
     a timeout
     a status
 
@@ -283,6 +287,7 @@ _disk_wait_drq_loop
     end
 
     jump _disk_wait_drq_loop
+end
 
 ###############################################################################
 # Function: disk_identify
@@ -294,7 +299,7 @@ _disk_wait_drq_loop
 # Returns: 1 if identify succeeded, 0 if failed.
 ###############################################################################
 
-disk_identify
+function disk_identify
     a status
     a word_idx
     a data_word
@@ -354,6 +359,7 @@ disk_identify
     end
 
     return 0
+end
 
 # =============================================================================
 # Section 4: Sector Read/Write
@@ -370,7 +376,7 @@ disk_identify
 # Returns: 0 on success, -1 on error.
 ###############################################################################
 
-disk_read_sector
+function disk_read_sector
     a lba
     a buffer
     a status
@@ -467,6 +473,7 @@ disk_read_sector
     call disk_wait_bsy
 
     return 0
+end
 
 ###############################################################################
 # Function: disk_write_sector
@@ -479,7 +486,7 @@ disk_read_sector
 # Returns: 0 on success, -1 on error.
 ###############################################################################
 
-disk_write_sector
+function disk_write_sector
     a lba
     a buffer
     a status
@@ -585,6 +592,7 @@ disk_write_sector
     call disk_wait_bsy
 
     return 0
+end
 
 ###############################################################################
 # Function: disk_read_sectors
@@ -598,7 +606,7 @@ disk_write_sector
 # Returns: 0 on success, -1 on error.
 ###############################################################################
 
-disk_read_sectors
+function disk_read_sectors
     a lba
     a count
     a buffer
@@ -632,6 +640,7 @@ disk_read_sectors
     end
 
     return 0
+end
 
 ###############################################################################
 # Function: disk_write_sectors
@@ -645,7 +654,7 @@ disk_read_sectors
 # Returns: 0 on success, -1 on error.
 ###############################################################################
 
-disk_write_sectors
+function disk_write_sectors
     a lba
     a count
     a buffer
@@ -679,6 +688,7 @@ disk_write_sectors
     end
 
     return 0
+end
 
 ###############################################################################
 # Function: disk_get_size
@@ -688,9 +698,10 @@ disk_write_sectors
 # Returns: sector count, or 0 if no disk.
 ###############################################################################
 
-disk_get_size
+function disk_get_size
     load disk_sector_count
     return it
+end
 
 ###############################################################################
 # End of disk.jstr

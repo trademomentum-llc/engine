@@ -1,6 +1,6 @@
-# ============================================================================
+###############################################################################
 # gic.jstr -- AArch64 GICv2 driver
-# ============================================================================
+###############################################################################
 # Provides a minimal distributor + CPU-interface driver for the ARM Generic
 # Interrupt Controller on QEMU 'virt'.
 #
@@ -8,12 +8,10 @@
 #   gic_init()              -- enable distributor and CPU interface
 #   gic_enable_irq(irq)     -- unmask a peripheral IRQ
 #   gic_disable_irq(irq)    -- mask a peripheral IRQ
+#   gic_clear_pending(irq)  -- clear a pending peripheral IRQ
 #   gic_eoi(irq)            -- signal end-of-interrupt
-#   gic_iar() -> u64        -- read interrupt acknowledge register
-#
-# Built-ins assumed from the AArch64 JStar backend:
-#   read32(addr), write32(addr, value)
-# ============================================================================
+#   gic_iar() -> long       -- read interrupt acknowledge register
+###############################################################################
 
 # ----------------------------------------------------------------------------
 # GICv2 memory-mapped base addresses
@@ -64,65 +62,131 @@ store 1 into GICC_CTLR_ENABLE
 # Initialize the GIC: enable distributor, enable CPU interface, allow all
 # priorities, and set a sensible binary point.
 # ----------------------------------------------------------------------------
-func gic_init() {
-    write32(GICD_BASE + GICD_CTLR, GICD_CTLR_ENABLE)
-    write32(GICC_BASE + GICC_PMR, 0xFF)
-    write32(GICC_BASE + GICC_BPR, 0x00)
-    write32(GICC_BASE + GICC_CTLR, GICC_CTLR_ENABLE)
-    return
-}
+function gic_init
+    a addr
+
+    add GICD_BASE GICD_CTLR
+    store it into addr
+    call mmio_write32 addr GICD_CTLR_ENABLE
+
+    add GICC_BASE GICC_PMR
+    store it into addr
+    call mmio_write32 addr 0xFF
+
+    add GICC_BASE GICC_BPR
+    store it into addr
+    call mmio_write32 addr 0x00
+
+    add GICC_BASE GICC_CTLR
+    store it into addr
+    call mmio_write32 addr GICC_CTLR_ENABLE
+
+    return 0
+end
 
 # ----------------------------------------------------------------------------
 # Enable (unmask) a shared peripheral interrupt.
 # ----------------------------------------------------------------------------
-func gic_enable_irq(irq: u64) {
-    let reg: u64 = (irq / 32) * 4
-    let bit: u64 = irq % 32
-    write32(GICD_BASE + GICD_ISENABLER + reg, 1 << bit)
-    return
-}
+function gic_enable_irq with long irq
+    a reg
+    a bit
+    a mask
+    a addr
+
+    divide irq 32
+    multiply it 4
+    store it into reg
+    modulo irq 32
+    store it into bit
+    shift 1 bit
+    store it into mask
+    add GICD_BASE GICD_ISENABLER
+    add it reg
+    store it into addr
+    call mmio_write32 addr mask
+    return 0
+end
 
 # ----------------------------------------------------------------------------
 # Disable (mask) a shared peripheral interrupt.
 # ----------------------------------------------------------------------------
-func gic_disable_irq(irq: u64) {
-    let reg: u64 = (irq / 32) * 4
-    let bit: u64 = irq % 32
-    write32(GICD_BASE + GICD_ICENABLER + reg, 1 << bit)
-    return
-}
+function gic_disable_irq with long irq
+    a reg
+    a bit
+    a mask
+    a addr
+
+    divide irq 32
+    multiply it 4
+    store it into reg
+    modulo irq 32
+    store it into bit
+    shift 1 bit
+    store it into mask
+    add GICD_BASE GICD_ICENABLER
+    add it reg
+    store it into addr
+    call mmio_write32 addr mask
+    return 0
+end
 
 # ----------------------------------------------------------------------------
 # Clear a pending interrupt.
 # ----------------------------------------------------------------------------
-func gic_clear_pending(irq: u64) {
-    let reg: u64 = (irq / 32) * 4
-    let bit: u64 = irq % 32
-    write32(GICD_BASE + GICD_ICPENDR + reg, 1 << bit)
-    return
-}
+function gic_clear_pending with long irq
+    a reg
+    a bit
+    a mask
+    a addr
+
+    divide irq 32
+    multiply it 4
+    store it into reg
+    modulo irq 32
+    store it into bit
+    shift 1 bit
+    store it into mask
+    add GICD_BASE GICD_ICPENDR
+    add it reg
+    store it into addr
+    call mmio_write32 addr mask
+    return 0
+end
 
 # ----------------------------------------------------------------------------
 # Signal end-of-interrupt to the CPU interface.
 # ----------------------------------------------------------------------------
-func gic_eoi(irq: u64) {
-    write32(GICC_BASE + GICC_EOIR, irq)
-    return
-}
+function gic_eoi with long irq
+    a addr
+
+    add GICC_BASE GICC_EOIR
+    store it into addr
+    call mmio_write32 addr irq
+    return 0
+end
 
 # ----------------------------------------------------------------------------
 # Read the Interrupt Acknowledge Register and return the interrupt ID.
 # ----------------------------------------------------------------------------
-func gic_iar() -> u64 {
-    let iar: u32 = read32(GICC_BASE + GICC_IAR)
-    return iar & 0x3FF
-}
+function gic_iar
+    a addr
+    a iar
+    a id
+
+    add GICC_BASE GICC_IAR
+    store it into addr
+    call mmio_read32 addr
+    store it into iar
+    bitand iar 0x3FF
+    store it into id
+    return id
+end
 
 # ----------------------------------------------------------------------------
 # HAL-compatible init wrapper for the ARM GICv2.
 # The node parameter is reserved for future DTB-based base-address discovery.
 # ----------------------------------------------------------------------------
-func gicv2_init(node: u64) -> u32 {
+function gicv2_init with long node
     call gic_init
     return 0
-}
+end

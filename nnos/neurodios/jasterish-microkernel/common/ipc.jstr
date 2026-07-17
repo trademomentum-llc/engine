@@ -28,13 +28,13 @@ global ipc_pool_count         int               # Total number of buffers (16)
 # Marks all 16 message buffers as free and prints a status message.
 # Called once during kernel initialization.
 # ---------------------------------------------------------------------------
-function ipc_init:
+function ipc_init
     # Set the total number of pre-allocated message buffers
     store 16 into ipc_pool_count
 
     # Mark all buffer slots as free (0 = available, 1 = in use)
     a idx
-    for idx from 0 to 15:
+    for idx from 0 to 15
         store 0 into ipc_pool_used at idx
     end
 
@@ -50,7 +50,8 @@ function ipc_init:
 #
 # Returns: buffer address in 'it', or 0 if pool exhausted.
 # ---------------------------------------------------------------------------
-function ipc_alloc_buffer:
+end
+function ipc_alloc_buffer
     a idx
     store 0 into idx
 
@@ -88,7 +89,8 @@ function ipc_alloc_buffer:
 #
 # Computes the buffer index from its address and marks it free.
 # ---------------------------------------------------------------------------
-function ipc_free_buffer:
+end
+function ipc_free_buffer
     a buf_addr
     # buf_addr is passed as the first argument
     # (In the real ABI this would be in RDI; here we use the parameter name)
@@ -131,7 +133,8 @@ function ipc_free_buffer:
 #
 # Returns: 0 on success, -1 on error (invalid destination, oversized payload).
 # ---------------------------------------------------------------------------
-function ipc_send:
+end
+function ipc_send
     a dest_pid
     a payload
     a size
@@ -261,7 +264,8 @@ function ipc_send:
 #
 # Returns: number of payload bytes copied, or -1 on error.
 # ---------------------------------------------------------------------------
-function ipc_receive:
+end
+function ipc_receive
     a buf
     a max_size
     a current_slot
@@ -319,7 +323,7 @@ function ipc_receive:
 
     # -------------------------------------------------------------------
     # Slow path: no message pending — block and wait.
-    # Mark current process as BLOCKED waiting for IPC, then yield CPU.
+    # Mark current process as BLOCKED waiting for IPC, then yield_cpu CPU.
     # -------------------------------------------------------------------
     store PROC_BLOCKED into proc_state at current_slot
 
@@ -380,7 +384,8 @@ function ipc_receive:
 #
 # Returns: payload bytes copied, or -1 if no message available.
 # ---------------------------------------------------------------------------
-function ipc_try_receive:
+end
+function ipc_try_receive
     a buf
     a max_size
     a current_slot
@@ -445,7 +450,8 @@ function ipc_try_receive:
 #
 # Returns: payload size if a message is pending, -1 otherwise.
 # ---------------------------------------------------------------------------
-function ipc_peek:
+end
+function ipc_peek
     a buf
     a current_slot
 
@@ -499,7 +505,8 @@ function ipc_peek:
 #
 # Returns: 0 if delivered, -1 if destination not found.
 # ---------------------------------------------------------------------------
-function ipc_notify:
+end
+function ipc_notify
     a dest_pid
     a event
     a dest_slot
@@ -556,7 +563,8 @@ function ipc_notify:
 #
 # Returns: count of successful deliveries.
 # ---------------------------------------------------------------------------
-function ipc_broadcast:
+end
+function ipc_broadcast
     a payload
     a size
     a exclude_pid
@@ -634,3 +642,4 @@ function ipc_broadcast:
     end
 
     return delivery_count
+end

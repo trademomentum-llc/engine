@@ -104,7 +104,7 @@ array 4096 tss_stack
 # hand off to kernel_main.
 ###############################################################################
 
-_start
+function _start
     # -------------------------------------------------------------------------
     # Multiboot2 Header
     # -------------------------------------------------------------------------
@@ -213,6 +213,7 @@ _start_halt_loop
     jump _start_halt_loop
 
     return 0
+end
 
 ###############################################################################
 # Function: serial_init
@@ -230,7 +231,7 @@ _start_halt_loop
 #   6. Re-enable interrupts
 ###############################################################################
 
-serial_init
+function serial_init
     # Save the UART register offsets as local variables for clarity
     a UART_DATA
     store COM1_PORT into UART_DATA
@@ -301,6 +302,7 @@ serial_init
     print "[serial] COM1 initialized at 115200 baud 8N1"
 
     return 0
+end
 
 ###############################################################################
 # Function: serial_putc(char c)
@@ -313,7 +315,7 @@ serial_init
 #   c - The ASCII character to send (byte value)
 ###############################################################################
 
-serial_putc
+function serial_putc
     a c
     # Parameter c is passed in register it; save it locally
     store it into c
@@ -371,6 +373,7 @@ _serial_putc_wait_loop
     end
 
     return 0
+end
 
 ###############################################################################
 # Function: serial_puts(string s)
@@ -383,7 +386,7 @@ _serial_putc_wait_loop
 #   s - Address of the null-terminated string
 ###############################################################################
 
-serial_puts
+function serial_puts
     a s
     # Parameter s (address) is passed in it; save locally
     store it into s
@@ -413,6 +416,7 @@ _serial_puts_loop
 
 _serial_puts_done
     return 0
+end
 
 ###############################################################################
 # Function: serial_print_hex(long value)
@@ -425,7 +429,7 @@ _serial_puts_done
 #   value - The 64-bit unsigned integer to print
 ###############################################################################
 
-serial_print_hex
+function serial_print_hex
     a value
     # Parameter value is passed in register it; save it locally
     store it into value
@@ -482,6 +486,7 @@ _serial_hex_loop
     end
 
     return 0
+end
 
 ###############################################################################
 # Function: serial_print_dec(int value)
@@ -495,7 +500,7 @@ _serial_hex_loop
 #   value - The 32-bit signed integer to print
 ###############################################################################
 
-serial_print_dec
+function serial_print_dec
     a value
     # Parameter value is passed in register it; save it locally
     store it into value
@@ -592,6 +597,7 @@ _serial_dec_print_loop
     end
 
     return 0
+end
 
 ###############################################################################
 # Function: gdt_init
@@ -611,7 +617,7 @@ _serial_dec_print_loop
 # all segment registers to use the new descriptors.
 ###############################################################################
 
-gdt_init
+function gdt_init
     # -------------------------------------------------------------------------
     # Entry 0: Null Descriptor (all zeros)
     # -------------------------------------------------------------------------
@@ -705,6 +711,7 @@ _gdt_reload_cs_done
     print "[gdt] GDT loaded: null, kcode, kdata, ucode, udata, tss"
 
     return 0
+end
 
 ###############################################################################
 # Function: tss_init
@@ -727,7 +734,7 @@ _gdt_reload_cs_done
 # We only care about RSP0. All other fields are zero.
 ###############################################################################
 
-tss_init
+function tss_init
     a i
     a tss_base
     a tss_limit
@@ -800,6 +807,7 @@ tss_init
 
     print "[tss] TSS initialized and TR loaded with 0x28"
     return 0
+end
 
 ###############################################################################
 # Function: cpu_halt
@@ -810,7 +818,7 @@ tss_init
 # re-enable and halt so NMIs can still wake us.
 ###############################################################################
 
-cpu_halt
+function cpu_halt
     # Disable interrupts to prevent a race condition
     inline "cli"
 
@@ -821,6 +829,7 @@ cpu_halt
     inline "hlt"
 
     return 0
+end
 
 ###############################################################################
 # Function: cpu_idle
@@ -831,7 +840,7 @@ cpu_halt
 # This function never returns -- it loops forever.
 ###############################################################################
 
-cpu_idle
+function cpu_idle
 _cpu_idle_loop
     # Enable interrupts
     inline "sti"
@@ -845,6 +854,7 @@ _cpu_idle_loop
 
     # Unreachable
     return 0
+end
 
 ###############################################################################
 # Function: panic(string msg)
@@ -857,7 +867,7 @@ _cpu_idle_loop
 #   msg - Null-terminated string describing the panic reason
 ###############################################################################
 
-panic
+function panic
     a msg
     # Parameter msg (string address) is passed in it; save locally
     store it into msg
@@ -946,6 +956,7 @@ _panic_halt_loop
     jump _panic_halt_loop
 
     return 0
+end
 
 ###############################################################################
 # Architecture-neutral HAL wrappers for common kernel code.
@@ -953,34 +964,39 @@ _panic_halt_loop
 # the IDT module.
 ###############################################################################
 
-arch_putc
+function arch_putc
     a c
     store it into c
     call serial_putc c
     return 0
+end
 
-arch_getc
+function arch_getc
     call keyboard_getc
     return it
+end
 
-arch_panic
+function arch_panic
     a msg
     store it into msg
     call panic msg
     return 0
+end
 
-arch_irq_enable
+function arch_irq_enable
     call idt_enable_interrupts
     return 0
 
 arch_irq_disable
     call idt_disable_interrupts
     return 0
+end
 
-arch_halt
+function arch_halt
     inline "sti"
     inline "hlt"
     return 0
+end
 
 ###############################################################################
 # End of boot.jstr

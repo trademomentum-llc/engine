@@ -68,7 +68,7 @@ global scancode_table    array 128 byte   # Scancode -> ASCII lookup table
 #
 # Cascade setup: the slave PIC is connected to the master's IRQ2.
 # ---------------------------------------------------------------------------
-function pic_init:
+function pic_init
     # Initialize PIC port constants
     store 0x20 into PIC1_COMMAND
     store 0x21 into PIC1_DATA
@@ -121,7 +121,8 @@ function pic_init:
 # clears the corresponding bit (0 = enabled), and writes it back.
 # IRQs 0-7 are on the master PIC; 8-15 on the slave.
 # ---------------------------------------------------------------------------
-function pic_unmask_irq:
+end
+function pic_unmask_irq
     a irq
     a mask
 
@@ -186,7 +187,8 @@ function pic_unmask_irq:
 # Reads the current mask, sets the corresponding bit (1 = disabled),
 # and writes it back.  Complement of pic_unmask_irq.
 # ---------------------------------------------------------------------------
-function pic_mask_irq:
+end
+function pic_mask_irq
     a irq
     a mask
 
@@ -252,7 +254,8 @@ function pic_mask_irq:
 # Sending EOI is what allows the PIC to re-prioritize and deliver
 # the next pending interrupt.
 # ---------------------------------------------------------------------------
-function pic_eoi:
+end
+function pic_eoi
     a irq
 
     # If the IRQ came from the slave PIC (IRQ 8-15), we must send
@@ -283,7 +286,8 @@ function pic_eoi:
 # After configuration, IRQ0 is unmasked so timer interrupts reach
 # the CPU.  The pit_handler() services each tick.
 # ---------------------------------------------------------------------------
-function pit_init:
+end
+function pit_init
     # Initialize PIT port constants
     store 0x40 into PIT_CHANNEL0
     store 0x41 into PIT_CHANNEL1
@@ -339,7 +343,8 @@ function pit_init:
 #
 # The handler must be fast — it is effectively the kernel heartbeat.
 # ---------------------------------------------------------------------------
-function pit_handler:
+end
+function pit_handler
     # Increment the global millisecond counter
     load tick_count
     add it 1
@@ -379,7 +384,8 @@ function pit_handler:
 # ring buffer head/tail pointers, and unmasks IRQ1 so keyboard
 # interrupts are delivered to keyboard_handler().
 # ---------------------------------------------------------------------------
-function keyboard_init:
+end
+function keyboard_init
     # Initialize keyboard port constants
     store 0x60 into KB_DATA_PORT
     store 0x64 into KB_STATUS_PORT
@@ -420,7 +426,7 @@ function keyboard_init:
 
     # Initialize entire table to 0 (unknown scancode)
     a i
-    for i from 0 to 127:
+    for i from 0 to 127
         store 0 into scancode_table at i
     end
 
@@ -503,7 +509,8 @@ function keyboard_init:
 #
 # Must send EOI to the PIC before returning.
 # ---------------------------------------------------------------------------
-function keyboard_handler:
+end
+function keyboard_handler
     a scancode
     a ascii_char
 
@@ -582,7 +589,8 @@ function keyboard_handler:
 #
 # Returns: ASCII character (1-255), or 0 if buffer empty.
 # ---------------------------------------------------------------------------
-function keyboard_getc:
+end
+function keyboard_getc
     a ch
 
     # Check if ring buffer is empty (head == tail)
@@ -621,7 +629,8 @@ function keyboard_getc:
 #
 # Returns: ASCII character code, or 0 if unknown.
 # ---------------------------------------------------------------------------
-function keyboard_scancode_to_ascii:
+end
+function keyboard_scancode_to_ascii
     a scancode
 
     # Bounds-check: scancode must be within table range [0, 127]
@@ -649,7 +658,8 @@ function keyboard_scancode_to_ascii:
 # Wrapper around the process module's sleep() function.
 # A value of 0 or negative returns immediately.
 # ---------------------------------------------------------------------------
-function msleep:
+end
+function msleep
     a milliseconds
 
     # Zero or negative sleep is a no-op
@@ -671,7 +681,8 @@ function msleep:
 #
 # Returns: milliseconds elapsed since system boot.
 # ---------------------------------------------------------------------------
-function get_uptime:
+end
+function get_uptime
     load tick_count
     return it
 
@@ -687,7 +698,8 @@ function get_uptime:
 # and PS/2 keyboard in the correct order (PIC must be first since
 # the other drivers depend on it for IRQ management).
 # ---------------------------------------------------------------------------
-function drivers_init:
+end
+function drivers_init
     print "DRIVERS: initializing hardware subsystem"
 
     # Step 1: Initialize the interrupt controller (must be first)
@@ -701,3 +713,4 @@ function drivers_init:
 
     print "DRIVERS: all hardware drivers initialized"
     return 0
+end

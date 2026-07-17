@@ -95,7 +95,7 @@ store 3 into next_fd
 # Creates a few default system files (boot.log, etc.).
 ###############################################################################
 
-vfs_init
+function vfs_init
     a idx
     a name_offset
 
@@ -147,6 +147,7 @@ vfs_init
 
     print "VFS: filesystem ready (16 slots, 1KB per file)"
     return 0
+end
 
 # =============================================================================
 # Section 4: Internal Helpers
@@ -161,7 +162,7 @@ vfs_init
 # Returns: file index (0-15) if found, -1 if not found.
 ###############################################################################
 
-vfs_find_file
+function vfs_find_file
     a name
     a idx
     a name_offset
@@ -225,6 +226,7 @@ vfs_find_file
     end
 
     return -1
+end
 
 ###############################################################################
 # Function: vfs_find_free_slot
@@ -233,7 +235,7 @@ vfs_find_file
 # Returns: slot index (0-15) if free slot found, -1 if full.
 ###############################################################################
 
-vfs_find_free_slot
+function vfs_find_free_slot
     a idx
 
     store 0 into idx
@@ -250,6 +252,7 @@ vfs_find_free_slot
     end
 
     return -1
+end
 
 ###############################################################################
 # Function: vfs_copy_name
@@ -260,7 +263,7 @@ vfs_find_free_slot
 # src:         source filename string
 ###############################################################################
 
-vfs_copy_name
+function vfs_copy_name
     a dest_offset
     a src
     a char_idx
@@ -286,6 +289,7 @@ vfs_copy_name
     end
 
     return 0
+end
 
 # =============================================================================
 # Section 5: File Operations
@@ -302,7 +306,7 @@ vfs_copy_name
 # Returns: file index on success, -1 if file exists or table full.
 ###############################################################################
 
-vfs_create
+function vfs_create
     a name
     a flags
     a slot
@@ -344,6 +348,7 @@ vfs_create
     print slot
 
     return slot
+end
 
 ###############################################################################
 # Function: vfs_delete
@@ -354,7 +359,7 @@ vfs_create
 # Returns: 0 on success, -1 if not found or protected.
 ###############################################################################
 
-vfs_delete
+function vfs_delete
     a name
     a slot
     a flags
@@ -401,6 +406,7 @@ vfs_delete
 
     print "VFS: deleted file"
     return 0
+end
 
 ###############################################################################
 # Function: vfs_open
@@ -413,7 +419,7 @@ vfs_delete
 # Returns: file descriptor (>= 0) on success, -1 on error.
 ###############################################################################
 
-vfs_open
+function vfs_open
     a name
     a mode
     a slot
@@ -475,6 +481,7 @@ vfs_open
     store it into next_fd
 
     return fd
+end
 
 ###############################################################################
 # Function: vfs_close
@@ -485,7 +492,7 @@ vfs_open
 # Returns: 0 on success, -1 if invalid fd.
 ###############################################################################
 
-vfs_close
+function vfs_close
     a fd
     a slot
     a flags
@@ -520,6 +527,7 @@ vfs_close
     store -1 into fd_table at fd
 
     return 0
+end
 
 ###############################################################################
 # Function: vfs_read
@@ -533,7 +541,7 @@ vfs_close
 # Returns: number of bytes actually read, or -1 on error.
 ###############################################################################
 
-vfs_read
+function vfs_read
     a fd
     a buf
     a count
@@ -606,6 +614,7 @@ vfs_read
     store it into file_pos at slot
 
     return bytes_read
+end
 
 ###############################################################################
 # Function: vfs_write
@@ -619,7 +628,7 @@ vfs_read
 # Returns: number of bytes written, or -1 on error.
 ###############################################################################
 
-vfs_write
+function vfs_write
     a fd
     a buf
     a count
@@ -699,6 +708,7 @@ vfs_write
     end
 
     return bytes_written
+end
 
 ###############################################################################
 # Function: vfs_read_file
@@ -713,7 +723,7 @@ vfs_write
 # Returns: bytes read on success, -1 on error.
 ###############################################################################
 
-vfs_read_file
+function vfs_read_file
     a name
     a buf
     a max_size
@@ -736,6 +746,7 @@ vfs_read_file
     call vfs_close fd
 
     return bytes_read
+end
 
 ###############################################################################
 # Function: vfs_seek
@@ -749,7 +760,7 @@ vfs_read_file
 # Returns: new cursor position, or -1 on error.
 ###############################################################################
 
-vfs_seek
+function vfs_seek
     a fd
     a offset
     a whence
@@ -801,6 +812,7 @@ vfs_seek
 
     store new_pos into file_pos at slot
     return new_pos
+end
 
 ###############################################################################
 # Function: vfs_list
@@ -808,7 +820,7 @@ vfs_seek
 # Print a directory listing of all files.
 ###############################################################################
 
-vfs_list
+function vfs_list
     a idx
     a flags
     a name_offset
@@ -872,6 +884,7 @@ vfs_list
     print ""
     print "========================"
     return 0
+end
 
 ###############################################################################
 # Function: vfs_load_from_disk
@@ -884,7 +897,7 @@ vfs_list
 # Returns: 0 on success, -1 if no disk or bad magic.
 ###############################################################################
 
-vfs_load_from_disk
+function vfs_load_from_disk
     a sector_idx
     a entry_idx
     a entry_offset
@@ -1081,6 +1094,7 @@ vfs_load_from_disk
 
     print "VFS: loaded filesystem from disk"
     return 0
+end
 
 ###############################################################################
 # Function: vfs_sync_to_disk
@@ -1093,7 +1107,7 @@ vfs_load_from_disk
 # Returns: 0 on success, -1 on error.
 ###############################################################################
 
-vfs_sync_to_disk
+function vfs_sync_to_disk
     a sector_idx
     a entry_idx
     a entry_offset
@@ -1284,6 +1298,7 @@ vfs_sync_to_disk
 
     print "VFS: synced filesystem to disk"
     return 0
+end
 
 ###############################################################################
 # End of vfs.jstr

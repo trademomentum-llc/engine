@@ -68,7 +68,7 @@ array 256 interrupt_handler_table
 # After setting all gates, loads the IDT via lidt.
 ###############################################################################
 
-idt_init
+function idt_init
     a vector
     a handler_addr
 
@@ -213,7 +213,8 @@ idt_init
 #   flags     - attribute byte (P+DPL+type)
 ###############################################################################
 
-idt_set_gate
+end
+function idt_set_gate
     a vector
     a handler
     a present_flag
@@ -307,7 +308,8 @@ idt_set_gate
 # Handler for vector 0: divide-by-zero error.
 ###############################################################################
 
-exception_divide_by_zero
+end
+function exception_divide_by_zero
     print ""
     print "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
     print "!! EXCEPTION: Divide-by-zero (vector 0)"
@@ -323,7 +325,8 @@ exception_divide_by_zero
 # Handler for vector 1: debug exception.
 ###############################################################################
 
-exception_debug
+end
+function exception_debug
     print "[exception] Debug (vector 1)"
     return 0
 
@@ -333,7 +336,8 @@ exception_debug
 # Handler for vector 2: non-maskable interrupt.
 ###############################################################################
 
-exception_nmi
+end
+function exception_nmi
     print "[exception] NMI (vector 2)"
     return 0
 
@@ -343,7 +347,8 @@ exception_nmi
 # Handler for vector 3: breakpoint (INT3).
 ###############################################################################
 
-exception_breakpoint
+end
+function exception_breakpoint
     print "[exception] Breakpoint (vector 3)"
     return 0
 
@@ -353,7 +358,8 @@ exception_breakpoint
 # Handler for vector 4: overflow.
 ###############################################################################
 
-exception_overflow
+end
+function exception_overflow
     print "[exception] Overflow (vector 4)"
     return 0
 
@@ -363,7 +369,8 @@ exception_overflow
 # Handler for vector 5: bound range exceeded.
 ###############################################################################
 
-exception_bound_range
+end
+function exception_bound_range
     print "[exception] Bound range exceeded (vector 5)"
     call panic "bound range exceeded"
     return 0
@@ -374,7 +381,8 @@ exception_bound_range
 # Handler for vector 6: invalid opcode.
 ###############################################################################
 
-exception_invalid_opcode
+end
+function exception_invalid_opcode
     print ""
     print "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
     print "!! EXCEPTION: Invalid Opcode (vector 6)"
@@ -390,7 +398,8 @@ exception_invalid_opcode
 # Handler for vector 7: device not available.
 ###############################################################################
 
-exception_device_na
+end
+function exception_device_na
     print "[exception] Device not available (vector 7)"
     call panic "device not available"
     return 0
@@ -402,7 +411,8 @@ exception_device_na
 # This is a critical error - the CPU faulted while handling a fault.
 ###############################################################################
 
-exception_double_fault
+end
+function exception_double_fault
     print ""
     print "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
     print "!! EXCEPTION: DOUBLE FAULT (vector 8)"
@@ -420,7 +430,8 @@ exception_double_fault
 # Handler for vector 10: invalid TSS.
 ###############################################################################
 
-exception_invalid_tss
+end
+function exception_invalid_tss
     print "[exception] Invalid TSS (vector 10)"
     call panic "invalid TSS"
     return 0
@@ -431,7 +442,8 @@ exception_invalid_tss
 # Handler for vector 11: segment not present.
 ###############################################################################
 
-exception_segment_np
+end
+function exception_segment_np
     print "[exception] Segment not present (vector 11)"
     call panic "segment not present"
     return 0
@@ -442,7 +454,8 @@ exception_segment_np
 # Handler for vector 12: stack-segment fault.
 ###############################################################################
 
-exception_stack_fault
+end
+function exception_stack_fault
     print "[exception] Stack fault (vector 12)"
     call panic "stack fault"
     return 0
@@ -453,7 +466,8 @@ exception_stack_fault
 # Handler for vector 13: general protection fault.
 ###############################################################################
 
-exception_gpf
+end
+function exception_gpf
     print ""
     print "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
     print "!! EXCEPTION: General Protection Fault (vector 13)"
@@ -470,7 +484,8 @@ exception_gpf
 # Reads CR2 to get the faulting address and prints diagnostic info.
 ###############################################################################
 
-exception_page_fault
+end
+function exception_page_fault
     a fault_addr
     a error_code
     a pte
@@ -519,8 +534,7 @@ exception_page_fault
         store it into new_phys
 
         load new_phys
-        load 0
-        if equal it it
+        if equal it 0
             print ""
             print "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
             print "!! EXCEPTION: Page Fault (vector 14)"
@@ -606,7 +620,8 @@ exception_page_fault
 # Handler for vector 16: x87 FPU error.
 ###############################################################################
 
-exception_fpu_error
+end
+function exception_fpu_error
     print "[exception] x87 FPU error (vector 16)"
     return 0
 
@@ -616,7 +631,8 @@ exception_fpu_error
 # Handler for vector 17: alignment check.
 ###############################################################################
 
-exception_alignment_check
+end
+function exception_alignment_check
     print "[exception] Alignment check (vector 17)"
     call panic "alignment check"
     return 0
@@ -627,7 +643,8 @@ exception_alignment_check
 # Handler for vector 18: machine check.
 ###############################################################################
 
-exception_machine_check
+end
+function exception_machine_check
     print ""
     print "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
     print "!! EXCEPTION: Machine Check (vector 18)"
@@ -644,7 +661,8 @@ exception_machine_check
 # Handler for vector 19: SIMD FPU exception.
 ###############################################################################
 
-exception_simd_error
+end
+function exception_simd_error
     print "[exception] SIMD error (vector 19)"
     return 0
 
@@ -660,7 +678,8 @@ exception_simd_error
 # jump here. We dispatch based on the vector to the specific driver handler.
 ###############################################################################
 
-irq_common_handler
+end
+function irq_common_handler
     a vector_num
 
     # In real implementation, vector_num is pushed by assembly stub
@@ -679,7 +698,8 @@ irq_common_handler
 # This is called by the low-level assembly IRQ stubs after saving context.
 ###############################################################################
 
-irq_dispatch
+end
+function irq_dispatch
     a irq_num
 
     store it into irq_num
@@ -742,7 +762,8 @@ irq_dispatch
 # Here we model the concept since Jasterish abstracts the assembly layer.
 ###############################################################################
 
-syscall_entry_point
+end
+function syscall_entry_point
     # Architecture-specific stub for int 0x80.  Build an argument array
     # from the user register frame and dispatch through the common
     # syscall handler.  The result is returned in RAX.
@@ -782,7 +803,8 @@ syscall_entry_point
 # Disable interrupts (CLI).
 ###############################################################################
 
-idt_disable_interrupts
+end
+function idt_disable_interrupts
     inline "cli"
     return 0
 
@@ -792,10 +814,12 @@ idt_disable_interrupts
 # Enable interrupts (STI).
 ###############################################################################
 
-idt_enable_interrupts
+end
+function idt_enable_interrupts
     inline "sti"
     return 0
 
 ###############################################################################
 # End of idt.jstr
 ###############################################################################
+end

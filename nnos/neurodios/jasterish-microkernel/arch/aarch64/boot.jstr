@@ -1,57 +1,82 @@
-section .text.startup
-
-# AArch64 early boot stub for the Jasterish Micro-Kernel.
-# This file provides the _start entry point, exception-level drop from
-# EL2 to EL1, initial EL1 stack setup, and hand-off to architecture
-# initialization and the common kernel main routine.
+###############################################################################
+# boot.jstr -- Jasterish Micro-Kernel: AArch64 Boot Module
+###############################################################################
+# Kernel entry point for the AArch64 port. Provides _start, which preserves
+# the DTB pointer, sets up the initial stack, drops from EL2 to EL1 when
+# necessary, and hands off to arch_init() and the common kernel_main().
 #
 # Interfaces:
 #   _start()           - kernel entry point, loaded by QEMU/bootloader
-#   arch_mmu_init()    - early MMU bootstrap (stub for Task 9)
-#   arch_init(dtb_ptr) - architecture-specific initialization
-#   kernel_main()      - common kernel main
+#   arch_mmu_init()    - early MMU bootstrap (memory_arch.jstr)
+#   arch_init(dtb_ptr) - architecture-specific initialization (hal.jstr)
+#   kernel_main()      - common kernel main (common/kernel.jstr)
+###############################################################################
 
-# Kernel entry point.  The implementations of arch_mmu_init(), arch_init(),
-# and kernel_main() live in the architecture-specific HAL files included
-# after boot.jstr by the Makefile.
-func _start() {
-    # x0 = DTB physical address (passed by QEMU or bootloader).
-    # Save it in a callee-saved register for later use.
-    let dtb_phys: u64 = x0
+function _start
+    a current_el
 
-    # Detect current exception level.
-    let current_el: u64 = mrs(CurrentEL)
-    current_el = current_el >> 2
-    current_el = current_el & 3
+    # x0 = DTB physical address (passed by QEMU or the bootloader).
+    # Save it in callee-saved x19 before anything clobbers x0.
+    inline "mov x19, x0"
 
-    # If we are running at EL2 (e.g. under QEMU with virtualiation extension),
-    # configure the hypervisor and drop to EL1.
-    if current_el == 2 {
-        # Configure HCR_EL2 to route exceptions to EL1.
-        msr(HCR_EL2, 0x80000000)
-        # Set SPSR_EL2: EL1h, interrupts masked.
-        msr(SPSR_EL2, 0x3C5)
-        # Set ELR_EL2 to the address after the eret.
-        msr(ELR_EL2, label_addr(el1_entry))
-        eret
-    }
+    # Set up the kernel stack at a fixed high physical address FIRST:
+    # every JStar local variable lives on the stack.  (add is used instead
+    # of mov because the orr-form of mov cannot encode sp.)
+    store 0x41000000 into register x0
+    inline "add sp, x0, 0"
 
-el1_entry:
-    # Set up EL1 stack at a fixed high address.
-    let stack_top: u64 = 0xFFFF800000100000
-    msr(SP_EL1, stack_top)
+    # BOOT marker must be the first visible output from the kernel.
+    print "BOOT"
 
-    # Enable MMU.
+    # DEBUG: confirm execution reached _start.
+    print "A"
+
+    # Detect the current exception level (CurrentEL bits [3:2]).
+    inline "mrs x0, currentel"
+    inline "lsr x0, x0, 2"
+    inline "and x0, x0, 3"
+    store register x0 into current_el
+
+    # If running at EL2 (e.g. QEMU with the virtualization extension),
+    # configure the hypervisor state and drop to EL1h via eret.
+    if equal current_el 2
+        # HCR_EL2: RW=1 (EL1 executes AArch64), all other routing off.
+        store 0x80000000 into register x0
+        inline "msr hcr_el2, x0"
+        # SPSR_EL2: EL1h (M[3:0]=0101), all exceptions masked (DAIF=0x3C0).
+        store 0x3C5 into register x0
+        inline "msr spsr_el2, x0"
+        # ELR_EL2 = the instruction right after eret.  From the adr:
+        # 4 (adr) + 4 (msr) + 4 (eret) = pc+12.
+        inline "adr x0, 12"
+        inline "msr elr_el2, x0"
+        inline "eret"
+    end
+
+    # Install exception vectors so any faults before the MMU is up are reported.
+    call exceptions_init
+
+    # DEBUG: confirm exceptions_init returned.
+    print "E"
+
+    # Enable the MMU (identity map + high kernel mapping).
     call arch_mmu_init
 
-    # Jump to arch_init with DTB pointer.
-    call arch_init dtb_phys
+    # DEBUG: confirm MMU init returned.
+    print "B"
 
-    # Enter common kernel (no multiboot pointer on AArch64).
+    # Run architecture initialization with the saved DTB pointer.
+    inline "mov x0, x19"
+    call arch_init
+
+    # DEBUG: confirm arch_init returned.
+    print "C"
+
+    # Enter the common kernel (no multiboot pointer on AArch64).
     call kernel_main 0
 
-    # Halt if kernel_main returns.
-halt:
-    wfe
-    branch halt
-}
+    # Halt forever if kernel_main ever returns.
+    while true
+        inline "wfe"
+    end
+end

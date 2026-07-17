@@ -91,7 +91,7 @@ store 40 into PHDR_OFF_MEMSZ
 # Returns: 1 if valid, 0 if invalid
 ###############################################################################
 
-elf_validate
+function elf_validate
     a buf
     a magic
     a elf_class
@@ -175,6 +175,7 @@ elf_validate
     end
 
     return 1
+end
 
 # =============================================================================
 # Section 3: ELF Loading
@@ -192,7 +193,7 @@ elf_validate
 # Returns: entry point address on success, 0 on failure
 ###############################################################################
 
-elf_load
+function elf_load
     a buf
     a entry_point
     a phoff
@@ -666,6 +667,7 @@ elf_load
     print "ELF: loaded successfully, entry=0x"
     call serial_print_hex entry_point
     return entry_point
+end
 
 ###############################################################################
 # End of elf.jstr

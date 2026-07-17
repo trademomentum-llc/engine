@@ -61,6 +61,7 @@ jobs:
       - name: Build AArch64 micro-kernel
         env:
           JASTERISH_COMPILER: ${{ github.workspace }}/apps/target/release/morphlex
+          CROSS_COMPILE: aarch64-linux-gnu-
         run: |
           cd nnos/neurodios/jasterish-microkernel
           make ARCH=aarch64 clean

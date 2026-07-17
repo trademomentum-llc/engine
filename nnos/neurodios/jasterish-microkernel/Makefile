@@ -227,9 +227,11 @@ $(KERNEL_ELF): $(JSTR_SRCS) $(LINKER_DEPS)
 	@$(JSTAR) $(JSTARFLAGS) --input $(MAIN_SRC) $(JSTAR_INCLUDES) --output $@
 
 # Rule: Convert ELF to raw binary (for direct kernel loading)
+# morphlex emits a minimal ELF with headers followed directly by .text/.data,
+# so we strip the ELF64 header (64 bytes) and single program header (56 bytes).
 $(KERNEL_BIN): $(KERNEL_ELF)
-	@echo "  OBJCOPY $@"
-	@$(OBJCOPY) -O binary $< $@
+	@echo "  BIN     $@"
+	@dd if=$< of=$@ bs=1 skip=$$((64 + 56)) 2>/dev/null
 
 # ----------------------------------------------------------------------------
 # QEMU Targets

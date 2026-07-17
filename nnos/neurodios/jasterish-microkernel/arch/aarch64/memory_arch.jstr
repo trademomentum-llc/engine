@@ -1,6 +1,6 @@
-# ============================================================================
+###############################################################################
 # memory_arch.jstr -- AArch64 MMU and page-table helpers
-# ============================================================================
+###############################################################################
 # Provides 4-level page-table management (4KB granule) for the Jasterish
 # Micro-Kernel AArch64 port.
 #
@@ -9,12 +9,12 @@
 #   arch_mmu_map(vaddr, paddr, flags)   -- insert a 4KB mapping
 #   arch_mmu_unmap(vaddr)               -- remove a 4KB mapping
 #   arch_mmu_switch(page_table)         -- switch TTBR0/TTBR1 and flush TLB
+#   arch_save_context(pcb)              -- save kernel sp/lr into the PCB
+#   arch_restore_context(pcb)           -- restore sp/lr (or eret to EL0)
 #
-# Built-ins assumed from the AArch64 JStar backend:
-#   read64(addr), write64(addr, value), memset(addr, value, size)
-#   msr(sysreg, value), mrs(sysreg), isb(), dsb(domain), tlbi_vae1is(vaddr)
-#   tlbi_vmalle1is()
-# ============================================================================
+# Also provides the mmio_read*/mmio_write* register-access helpers used by
+# the UART, GIC, and FDT drivers.
+###############################################################################
 
 # ----------------------------------------------------------------------------
 # AArch64 translation constants (4KB granule, 48-bit VAs)
@@ -51,16 +51,64 @@ global BLOCK_SIZE
 store 0x40000000 into BLOCK_SIZE  # 1 GB block
 
 global IDENTITY_GB
-store 1 into IDENTITY_GB          # map 1 GB identity
+store 2 into IDENTITY_GB          # map 2 GB identity (low MMIO + kernel image)
 
 global KERNEL_HIGH_BASE
 store 0xFFFF800000000000 into KERNEL_HIGH_BASE
 
 # ----------------------------------------------------------------------------
+# Page-table flag constants shared with the arch-independent kernel code
+# (common/elf.jstr, common/process.jstr).  Values match the x86_64 port;
+# on AArch64, flags bit 1 doubles as the descriptor table/page bit, so raw
+# x86-style flags still produce valid L3 page descriptors.
+# ----------------------------------------------------------------------------
+global PAGE_PRESENT
+store 1 into PAGE_PRESENT
+
+global PAGE_WRITABLE
+store 2 into PAGE_WRITABLE
+
+global PAGE_USER
+store 4 into PAGE_USER
+
+global PAGE_HUGE
+store 128 into PAGE_HUGE
+
+global PAGE_COW
+store 512 into PAGE_COW
+
+global PAGE_FLAGS_MASK
+store 0xFFFFFFFFFFFFF000 into PAGE_FLAGS_MASK
+
+# ----------------------------------------------------------------------------
+# Physical memory manager state.  QEMU 'virt' RAM starts at 0x40000000.
+# pmm_next_page/pmm_total_pages are measured in 4KB pages from RAM base.
+# ----------------------------------------------------------------------------
+global PMM_RAM_BASE
+store 0x40000000 into PMM_RAM_BASE
+
+global pmm_next_page
+store 0 into pmm_next_page
+
+global pmm_total_pages
+store 0 into pmm_total_pages
+
+# ----------------------------------------------------------------------------
+# Kernel heap state: a 1 MB static pool with a simple bump allocator.
+# (array N reserves N 64-bit slots, i.e. 131072 * 8 = 1 MB.)
+# ----------------------------------------------------------------------------
+global heap_pool
+array 131072 heap_pool
+
+global heap_next
+store 0 into heap_next
+
+# ----------------------------------------------------------------------------
 # Early page-table pool (BSS). 32 pages = enough for bootstrap + a few maps.
+# (array N reserves N 64-bit slots, i.e. 16384 * 8 = 128 KB = 32 pages.)
 # ----------------------------------------------------------------------------
 global early_page_pool
-array 131072 early_page_pool      # 32 * 4096 bytes
+array 16384 early_page_pool
 
 global next_page_idx
 store 0 into next_page_idx
@@ -69,234 +117,622 @@ global kernel_pgdir
 store 0 into kernel_pgdir
 
 # ----------------------------------------------------------------------------
+# Memory-mapped register access helpers (used by all AArch64 drivers).
+# ----------------------------------------------------------------------------
+
+function mmio_read32 with long addr
+    a result
+    store addr into register x0
+    inline "ldr w0, [x0]"
+    store register x0 into result
+    return result
+end
+
+function mmio_write32 with long addr with long val
+    store addr into register x0
+    store val into register x1
+    inline "str w1, [x0]"
+    return 0
+end
+
+function mmio_read8 with long addr
+    a result
+    store addr into register x0
+    inline "ldrb w0, [x0]"
+    store register x0 into result
+    return result
+end
+
+function mmio_write8 with long addr with long val
+    store addr into register x0
+    store val into register x1
+    inline "strb w1, [x0]"
+    return 0
+end
+
+function mmio_read64 with long addr
+    a result
+    store addr into register x0
+    inline "ldr x0, [x0]"
+    store register x0 into result
+    return result
+end
+
+function mmio_write64 with long addr with long val
+    store addr into register x0
+    store val into register x1
+    inline "str x1, [x0]"
+    return 0
+end
+
+# ----------------------------------------------------------------------------
 # Allocate a zeroed physical page from the early pool.
 # ----------------------------------------------------------------------------
-func page_alloc() -> u64 {
-    let idx: u64 = next_page_idx
-    next_page_idx = next_page_idx + 1
-    let paddr: u64 = early_page_pool + (idx * PAGE_SIZE)
-    memset(paddr, 0, PAGE_SIZE)
+function page_alloc
+    a idx
+    a paddr
+    a i
+
+    store next_page_idx into idx
+    add next_page_idx 1
+    store it into next_page_idx
+
+    addressof early_page_pool
+    store it into paddr
+    # The compiler places the BSS pool at an arbitrary offset; ensure every
+    # page we hand out is 4KB-aligned so it can be used as a page table.
+    add paddr PAGE_SIZE
+    subtract it 1
+    store it into paddr
+    bitand paddr PTE_FLAGS_MASK
+    store it into paddr
+    multiply idx PAGE_SIZE
+    store it into i
+    add paddr i
+    store it into paddr
+
+    # Zero the page (512 64-bit words).
+    store 0 into i
+    while less i 512
+        store 0 into paddr at i
+        add i 1
+        store it into i
+    end
+
     return paddr
-}
+end
 
 # ----------------------------------------------------------------------------
-# Level index extraction.
+# Level index extraction.  Right shifts use inline lsr because vaddr may
+# have the top bit set (kernel high-half addresses).
 # ----------------------------------------------------------------------------
-func pt_index_l0(vaddr: u64) -> u64 {
-    return (vaddr >> 39) & LEVEL_MASK
-}
+function pt_index_l0 with long vaddr
+    a tmp
+    a result
+    store vaddr into register x0
+    inline "lsr x0, x0, 39"
+    store register x0 into tmp
+    bitand tmp LEVEL_MASK
+    store it into result
+    return result
+end
 
-func pt_index_l1(vaddr: u64) -> u64 {
-    return (vaddr >> 30) & LEVEL_MASK
-}
+function pt_index_l1 with long vaddr
+    a tmp
+    a result
+    store vaddr into register x0
+    inline "lsr x0, x0, 30"
+    store register x0 into tmp
+    bitand tmp LEVEL_MASK
+    store it into result
+    return result
+end
 
-func pt_index_l2(vaddr: u64) -> u64 {
-    return (vaddr >> 21) & LEVEL_MASK
-}
+function pt_index_l2 with long vaddr
+    a tmp
+    a result
+    store vaddr into register x0
+    inline "lsr x0, x0, 21"
+    store register x0 into tmp
+    bitand tmp LEVEL_MASK
+    store it into result
+    return result
+end
 
-func pt_index_l3(vaddr: u64) -> u64 {
-    return (vaddr >> 12) & LEVEL_MASK
-}
+function pt_index_l3 with long vaddr
+    a tmp
+    a result
+    store vaddr into register x0
+    inline "lsr x0, x0, 12"
+    store register x0 into tmp
+    bitand tmp LEVEL_MASK
+    store it into result
+    return result
+end
 
 # ----------------------------------------------------------------------------
 # Build table and page descriptors.
 # ----------------------------------------------------------------------------
-func pte_table(next_table: u64) -> u64 {
-    return (next_table & PTE_FLAGS_MASK) | PTE_VALID | PTE_TABLE
-}
+function pte_table with long next_table
+    a result
+    bitand next_table PTE_FLAGS_MASK
+    store it into result
+    bitor result PTE_VALID
+    store it into result
+    bitor result PTE_TABLE
+    store it into result
+    return result
+end
 
-func pte_page(paddr: u64, flags: u64) -> u64 {
-    return (paddr & PTE_FLAGS_MASK) | flags | PTE_VALID | PTE_AF
-}
+function pte_page with long paddr with long flags
+    a result
+    bitand paddr PTE_FLAGS_MASK
+    store it into result
+    bitor result flags
+    store it into result
+    bitor result PTE_VALID
+    store it into result
+    bitor result PTE_AF
+    store it into result
+    return result
+end
+
+# ----------------------------------------------------------------------------
+# Build a level 1 block descriptor (1 GB) for the identity/high kernel maps.
+# Block descriptors differ from page descriptors only by bit 1 == 0.
+# ----------------------------------------------------------------------------
+function pte_block with long paddr with long flags
+    a result
+    bitand paddr PTE_FLAGS_MASK
+    store it into result
+    bitor result flags
+    store it into result
+    bitor result PTE_VALID
+    store it into result
+    bitor result PTE_AF
+    store it into result
+    return result
+end
 
 # ----------------------------------------------------------------------------
 # Bootstrap MMU: identity-map the first 1GB and map the kernel high region
 # to the same physical low memory.  Enables the MMU on return.
 # ----------------------------------------------------------------------------
-func arch_mmu_init() {
-    let l0: u64 = page_alloc()
-    kernel_pgdir = l0
+function arch_mmu_init
+    a l0
+    a l1_identity
+    a block
+    a paddr
+    a entry
+    a pte_val
+    a high_l0_idx
+    a l1_high
+    a high_entry
+    a sctlr
+    a tmp
+
+    call page_alloc
+    store it into l0
+    store l0 into kernel_pgdir
 
     # Identity map: one 1GB block at level 1.
-    let l1_identity: u64 = page_alloc()
-    write64(l0 + 0, pte_table(l1_identity))
+    call page_alloc
+    store it into l1_identity
+    call pte_table l1_identity
+    store it into pte_val
+    store pte_val into l0 at 0
 
-    let block: u64 = 0
-    while block < IDENTITY_GB {
-        let paddr: u64 = block * BLOCK_SIZE
-        let entry: u64 = (paddr & PTE_FLAGS_MASK)
-                       | PTE_ATTRIDX_NORMAL
-                       | PTE_AF
-                       | PTE_VALID
-        write64(l1_identity + (block * 8), entry)
-        block = block + 1
-    }
+    store 0 into block
+    while less block IDENTITY_GB
+        multiply block BLOCK_SIZE
+        store it into paddr
+        bitand paddr PTE_FLAGS_MASK
+        store it into entry
+        bitor entry PTE_ATTRIDX_NORMAL
+        store it into entry
+        bitor entry PTE_AF
+        store it into entry
+        bitor entry PTE_VALID
+        store it into entry
+        store entry into l1_identity at block
+        add block 1
+        store it into block
+    end
 
     # Kernel high mapping: map 0xFFFF800000000000 -> physical 0 (1GB block).
-    let high_l0_idx: u64 = (KERNEL_HIGH_BASE >> 39) & LEVEL_MASK
-    let l1_high: u64 = page_alloc()
-    write64(l0 + (high_l0_idx * 8), pte_table(l1_high))
+    store KERNEL_HIGH_BASE into register x0
+    inline "lsr x0, x0, 39"
+    store register x0 into tmp
+    bitand tmp LEVEL_MASK
+    store it into high_l0_idx
 
-    let high_entry: u64 = (0 & PTE_FLAGS_MASK)
-                        | PTE_ATTRIDX_NORMAL
-                        | PTE_AF
-                        | PTE_VALID
-    write64(l1_high + 0, high_entry)
+    call page_alloc
+    store it into l1_high
+    call pte_table l1_high
+    store it into pte_val
+    store pte_val into l0 at high_l0_idx
 
-    # Memory attributes: Attr0 = Normal WBWA, Attr1 = Device nGnRnE.
-    msr(MAIR_EL1, 0xFF04)
+    bitor PTE_ATTRIDX_NORMAL PTE_AF
+    store it into high_entry
+    bitor high_entry PTE_VALID
+    store it into high_entry
+    store high_entry into l1_high at 0
 
-    # TCR_EL1: 48-bit VAs, 4KB granule for TTBR0 and TTBR1, 40-bit IPS.
-    msr(TCR_EL1, 0x0000000297101710)
+    # Memory attributes: Attr0 = Normal WBWA (0xFF), Attr1 = Device (0x04).
+    store 0xFF04 into register x0
+    inline "msr mair_el1, x0"
+
+    # TCR_EL1: 48-bit VAs, 4KB granule for TTBR0/TTBR1, 48-bit IPS.
+    store 0x0000000575103510 into register x0
+    inline "msr tcr_el1, x0"
 
     # Point both translation bases at the kernel page table.
-    msr(TTBR0_EL1, l0)
-    msr(TTBR1_EL1, l0)
-    isb()
+    store l0 into register x0
+    inline "msr ttbr0_el1, x0"
+    inline "msr ttbr1_el1, x0"
+    inline "isb"
 
-    # Enable MMU + alignment + caches.
-    let sctlr: u64 = mrs(SCTLR_EL1)
-    sctlr = sctlr | 0x1005
-    msr(SCTLR_EL1, sctlr)
-    isb()
+    # Enable MMU + instruction/data caches.
+    inline "mrs x0, sctlr_el1"
+    store register x0 into sctlr
+    bitor sctlr 0x1005
+    store it into register x0
 
-    return
-}
+    # Invalidate any stale TLB entries before turning on the MMU.
+    inline "tlbi vmalle1is, xzr"
+    inline "dsb ish"
+    inline "isb"
+
+    inline "msr sctlr_el1, x0"
+    inline "isb"
+
+    return 0
+end
 
 # ----------------------------------------------------------------------------
 # Walk the kernel page tables and create a 4KB mapping.
 # ----------------------------------------------------------------------------
-func arch_mmu_map(vaddr: u64, paddr: u64, flags: u64) -> u64 {
-    let table: u64 = kernel_pgdir
-    let idx0: u64 = pt_index_l0(vaddr)
-    let entry: u64 = read64(table + (idx0 * 8))
-    if (entry & PTE_VALID) == 0 {
-        let next: u64 = page_alloc()
-        write64(table + (idx0 * 8), pte_table(next))
-        table = next
-    } else {
-        table = entry & PTE_FLAGS_MASK
-    }
+function arch_mmu_map with long vaddr with long paddr with long flags
+    a table
+    a idx0
+    a idx1
+    a idx2
+    a idx3
+    a entry
+    a next
+    a pte_val
+    a tmp
 
-    let idx1: u64 = pt_index_l1(vaddr)
-    entry = read64(table + (idx1 * 8))
-    if (entry & PTE_VALID) == 0 {
-        let next: u64 = page_alloc()
-        write64(table + (idx1 * 8), pte_table(next))
-        table = next
-    } else {
-        table = entry & PTE_FLAGS_MASK
-    }
+    store kernel_pgdir into table
 
-    let idx2: u64 = pt_index_l2(vaddr)
-    entry = read64(table + (idx2 * 8))
-    if (entry & PTE_VALID) == 0 {
-        let next: u64 = page_alloc()
-        write64(table + (idx2 * 8), pte_table(next))
-        table = next
-    } else {
-        table = entry & PTE_FLAGS_MASK
-    }
+    call pt_index_l0 vaddr
+    store it into idx0
+    load table at idx0
+    store it into entry
+    bitand entry PTE_VALID
+    store it into tmp
+    if equal tmp 0
+        call page_alloc
+        store it into next
+        call pte_table next
+        store it into pte_val
+        store pte_val into table at idx0
+        store next into table
+    else
+        bitand entry PTE_FLAGS_MASK
+        store it into table
+    end
 
-    let idx3: u64 = pt_index_l3(vaddr)
-    write64(table + (idx3 * 8), pte_page(paddr, flags))
+    call pt_index_l1 vaddr
+    store it into idx1
+    load table at idx1
+    store it into entry
+    bitand entry PTE_VALID
+    store it into tmp
+    if equal tmp 0
+        call page_alloc
+        store it into next
+        call pte_table next
+        store it into pte_val
+        store pte_val into table at idx1
+        store next into table
+    else
+        bitand entry PTE_FLAGS_MASK
+        store it into table
+    end
 
-    tlbi_vae1is(vaddr)
-    dsb(ish)
-    isb()
+    call pt_index_l2 vaddr
+    store it into idx2
+    load table at idx2
+    store it into entry
+    bitand entry PTE_VALID
+    store it into tmp
+    if equal tmp 0
+        call page_alloc
+        store it into next
+        call pte_table next
+        store it into pte_val
+        store pte_val into table at idx2
+        store next into table
+    else
+        bitand entry PTE_FLAGS_MASK
+        store it into table
+    end
+
+    call pt_index_l3 vaddr
+    store it into idx3
+    call pte_page paddr flags
+    store it into pte_val
+    store pte_val into table at idx3
+
+    store vaddr into register x0
+    inline "tlbi vae1is, x0"
+    inline "dsb ish"
+    inline "isb"
 
     return 0
-}
+end
 
 # ----------------------------------------------------------------------------
 # Remove a 4KB mapping and invalidate the TLB for it.
 # ----------------------------------------------------------------------------
-func arch_mmu_unmap(vaddr: u64) {
-    let table: u64 = kernel_pgdir
+function arch_mmu_unmap with long vaddr
+    a table
+    a idx0
+    a idx1
+    a idx2
+    a idx3
+    a entry
+    a tmp
 
-    let idx0: u64 = pt_index_l0(vaddr)
-    let entry: u64 = read64(table + (idx0 * 8))
-    if (entry & PTE_VALID) == 0 { return }
-    table = entry & PTE_FLAGS_MASK
+    store kernel_pgdir into table
 
-    let idx1: u64 = pt_index_l1(vaddr)
-    entry = read64(table + (idx1 * 8))
-    if (entry & PTE_VALID) == 0 { return }
-    table = entry & PTE_FLAGS_MASK
+    call pt_index_l0 vaddr
+    store it into idx0
+    load table at idx0
+    store it into entry
+    bitand entry PTE_VALID
+    store it into tmp
+    if equal tmp 0
+        return 0
+    end
+    bitand entry PTE_FLAGS_MASK
+    store it into table
 
-    let idx2: u64 = pt_index_l2(vaddr)
-    entry = read64(table + (idx2 * 8))
-    if (entry & PTE_VALID) == 0 { return }
-    table = entry & PTE_FLAGS_MASK
+    call pt_index_l1 vaddr
+    store it into idx1
+    load table at idx1
+    store it into entry
+    bitand entry PTE_VALID
+    store it into tmp
+    if equal tmp 0
+        return 0
+    end
+    bitand entry PTE_FLAGS_MASK
+    store it into table
 
-    let idx3: u64 = pt_index_l3(vaddr)
-    write64(table + (idx3 * 8), 0)
+    call pt_index_l2 vaddr
+    store it into idx2
+    load table at idx2
+    store it into entry
+    bitand entry PTE_VALID
+    store it into tmp
+    if equal tmp 0
+        return 0
+    end
+    bitand entry PTE_FLAGS_MASK
+    store it into table
 
-    tlbi_vae1is(vaddr)
-    dsb(ish)
-    isb()
+    call pt_index_l3 vaddr
+    store it into idx3
+    store 0 into table at idx3
 
-    return
-}
+    store vaddr into register x0
+    inline "tlbi vae1is, x0"
+    inline "dsb ish"
+    inline "isb"
+
+    return 0
+end
 
 # ----------------------------------------------------------------------------
 # Switch to a new page-table root for EL1.
 # ----------------------------------------------------------------------------
-func arch_mmu_switch(page_table: u64) {
-    msr(TTBR0_EL1, page_table)
-    msr(TTBR1_EL1, page_table)
-    tlbi_vmalle1is()
-    dsb(ish)
-    isb()
-    return
-}
+function arch_mmu_switch with long page_table
+    store page_table into register x0
+    inline "msr ttbr0_el1, x0"
+    inline "msr ttbr1_el1, x0"
+    inline "tlbi vmalle1is, xzr"
+    inline "dsb ish"
+    inline "isb"
+    return 0
+end
 
 # ----------------------------------------------------------------------------
 # Context-switch HAL helpers.
 # These operate on the PCB arrays defined by the arch-independent scheduler
 # (common/process.jstr): proc_rsp, proc_rip, proc_user_rip, proc_user_rsp.
 # ----------------------------------------------------------------------------
-func arch_save_context(pcb: u64) {
-    # Save the kernel stack pointer and link register for this slot.
-    let sp_tmp: u64 = sp
-    store sp_tmp into proc_rsp at pcb
-    let lr_tmp: u64 = x30
-    store lr_tmp into proc_rip at pcb
-    return
-}
 
-func arch_restore_context(pcb: u64) {
-    let user_rip: u64 = 0
-    let user_rsp: u64 = 0
-    let sp_tmp: u64 = 0
-    let lr_tmp: u64 = 0
+# Store a 64-bit value at [stack_top - 8]. Used during process creation to
+# push the initial entry point onto a fresh kernel stack.
+function arch_store_stack_entry with long stack_top with long entry_point
+    store stack_top into register x0
+    store entry_point into register x1
+    inline "str x1, [x0, #-8]"
+    return 0
+end
+
+function arch_save_context with long pcb
+    a sp_tmp
+    a lr_tmp
+
+    # Save the CALLER's kernel stack pointer and link register for this slot.
+    # The function prologue pushed x29/x30 and set x29 to our frame base, so
+    # the caller's LR lives at [x29, #8] and the caller's SP is x29 + 16.
+    inline "ldr x0, [x29, #8]"
+    store register x0 into lr_tmp
+    store lr_tmp into proc_rip at pcb
+    inline "add x0, x29, 16"
+    store register x0 into sp_tmp
+    store sp_tmp into proc_rsp at pcb
+    return 0
+end
+
+function arch_restore_context with long pcb
+    a user_rip
+    a user_rsp
+    a sp_tmp
+    a lr_tmp
 
     # Determine whether this is a user-mode process.
     load proc_user_rip at pcb
     store it into user_rip
 
-    load user_rip
-    load 0
-    if not equal it it {
-        # User-mode entry via eret.
+    if compare user_rip 0
+        # User-mode entry via eret to EL0.
         load proc_user_rsp at pcb
         store it into user_rsp
+        store user_rsp into register x0
+        inline "msr sp_el0, x0"
+        store user_rip into register x0
+        inline "msr elr_el1, x0"
+        store 0x3C0 into register x0
+        inline "msr spsr_el1, x0"
+        inline "eret"
+        return 0
+    end
 
-        asm "msr sp_el0, %0" with user_rsp
-        msr(ELR_EL1, user_rip)
-        msr(SPSR_EL1, 0x3C0)
-        eret
-        return
-    }
-
-    # Kernel-mode entry: restore SP and LR, then return.
+    # Kernel-mode entry: load the target SP and LR into temps, then restore
+    # SP/LR and return.  The LR must be loaded into x30 BEFORE we change sp,
+    # because after sp is switched our own stack locals are no longer accessible.
     load proc_rsp at pcb
     store it into sp_tmp
-    asm "mov sp, %0" with sp_tmp
     load proc_rip at pcb
     store it into lr_tmp
-    asm "mov x30, %0" with lr_tmp
+    store sp_tmp into register x0
+    store lr_tmp into register x30
+    inline "add sp, x0, 0"
     inline "ret"
 
-    return
-}
+    return 0
+end
+
+# ----------------------------------------------------------------------------
+# Physical Memory Manager (PMM)
+# ----------------------------------------------------------------------------
+# Simple bump allocator over the QEMU 'virt' RAM region. pmm_init reserves
+# the first reserved_mb megabytes (kernel image, stacks, page pools) and
+# manages total_mb megabytes overall.
+# ----------------------------------------------------------------------------
+function pmm_init with long reserved_mb with long total_mb
+    multiply reserved_mb 256
+    store it into pmm_next_page
+    multiply total_mb 256
+    store it into pmm_total_pages
+    return 0
+end
+
+function pmm_init_multiboot with long mb_ptr
+    # No multiboot on AArch64: fall back to the default 512MB layout.
+    call pmm_init 32 480
+    return 0
+end
+
+function pmm_alloc
+    a addr
+    if less pmm_next_page pmm_total_pages
+        multiply pmm_next_page PAGE_SIZE
+        add it PMM_RAM_BASE
+        store it into addr
+        add pmm_next_page 1
+        store it into pmm_next_page
+        return addr
+    end
+    return 0
+end
+
+function pmm_free with long addr
+    # Bump allocator: individual pages are not reclaimed.
+    return 0
+end
+
+# ----------------------------------------------------------------------------
+# Virtual Memory Manager (VMM)
+# ----------------------------------------------------------------------------
+# Thin wrappers over the AArch64 page-table helpers above. The MMU is
+# already enabled by _start via arch_mmu_init before kernel_main runs.
+# ----------------------------------------------------------------------------
+function vmm_init
+    return 0
+end
+
+function vmm_map_page with long virt with long phys with long flags
+    call arch_mmu_map virt phys flags
+    return it
+end
+
+function vmm_map_page_in_table with long cr3 with long virt with long phys with long flags
+    # The AArch64 helpers always operate on kernel_pgdir.
+    call arch_mmu_map virt phys flags
+    return it
+end
+
+function vmm_new_page_table
+    call page_alloc
+    return it
+end
+
+function vmm_unmap_page with long vaddr
+    call arch_mmu_unmap vaddr
+    return it
+end
+
+function vmm_virt_to_phys with long vaddr
+    a phys
+    # Kernel high-half addresses translate by subtracting KERNEL_HIGH_BASE;
+    # everything else is identity-mapped. The threshold check avoids
+    # unsigned/signed comparison issues with the high base constant.
+    subtract vaddr KERNEL_HIGH_BASE
+    store it into phys
+    if less phys 0x0000800000000000
+        return phys
+    end
+    return vaddr
+end
+
+# ----------------------------------------------------------------------------
+# Kernel heap allocator (kmalloc/kfree)
+# ----------------------------------------------------------------------------
+function heap_init
+    store 0 into heap_next
+    return 0
+end
+
+function kmalloc with long size
+    a rem
+    a aligned
+    a ptr
+
+    # Round the requested size up to a 16-byte multiple.
+    store size into aligned
+    bitand size 15
+    store it into rem
+    if compare rem 0
+        subtract 16 rem
+        add it aligned
+        store it into aligned
+    end
+
+    addressof heap_pool
+    add it heap_next
+    store it into ptr
+    add heap_next aligned
+    store it into heap_next
+    return ptr
+end
+
+function kfree with long ptr
+    # Bump allocator: individual allocations are not reclaimed.
+    return 0
+end
