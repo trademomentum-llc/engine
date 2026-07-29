@@ -47,7 +47,7 @@ KERNEL_ISO      := $(KERNEL_NAME).iso
 # Jasterish compiler.
 # The real compiler on this machine is the morphlex JStar frontend.
 # Override JASTERISH_COMPILER via environment or make variable for CI.
-JASTERISH_COMPILER ?= /Users/nnos/Projects/apps/target/debug/morphlex
+JASTERISH_COMPILER ?= $(CURDIR)/../../../../apps/target/debug/morphlex
 JSTAR           := $(JASTERISH_COMPILER) jstar compile
 
 # Cross-compiler toolchain (adjust prefix if using a cross-compiler)
@@ -199,7 +199,15 @@ GDB_SYMBOLS     := file $(KERNEL_ELF)
 # Default Target
 # ----------------------------------------------------------------------------
 
-.PHONY: all build run iso debug test selftest clean count help
+.PHONY: all build run iso debug test selftest clean count help regression regression-update
+
+REGRESSION_DIR := tests/regression
+
+regression:
+	@python3 scripts/jmk_regression.py $(REGRESSION_DIR)
+
+regression-update:
+	@python3 scripts/jmk_regression.py $(REGRESSION_DIR) --update
 
 # Default: build the kernel binary
 all: build
