@@ -1,0 +1,10 @@
+/jmk.bin
+*.elf
+*.o
+*.img
+*.iso
+actual.*.log
+test_output.log
+iso/
+.gdbinit
+init_user.jstr
