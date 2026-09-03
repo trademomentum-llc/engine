@@ -36,14 +36,13 @@ int lst_seal(const char *file_path) {
         fprintf(stderr, "seal: file not found: %s\n", file_path);
         return -1;
     }
-    close(file_fd);
-
     /* Write seal marker */
     char marker[LST_MAX_PATH];
     seal_marker_path(marker, sizeof(marker), file_path);
 
     FILE *f = lst_secure_fopen(marker, "w");
     if (!f) {
+        close(file_fd);
         fprintf(stderr, "seal: cannot write marker: %s\n", marker);
         return -1;
     }
@@ -63,7 +62,8 @@ int lst_seal(const char *file_path) {
     fclose(f);
 
     /* Set read-only: 444 */
-    chmod(file_path, S_IRUSR | S_IRGRP | S_IROTH);
+    fchmod(file_fd, S_IRUSR | S_IRGRP | S_IROTH);
+    close(file_fd);
 
     /* On Linux, try chattr +i */
 #ifdef __linux__
