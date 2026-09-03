@@ -12,6 +12,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <time.h>
 
 /* Simple SHA-256 would go here — for now, use file size + mtime as fingerprint.
@@ -26,24 +29,28 @@ static void seal_marker_path(char *dst, size_t maxlen, const char *file_path) {
 int lst_seal(const char *file_path) {
     if (!file_path) return -1;
 
+    int file_fd = open(file_path, O_RDONLY | O_NOFOLLOW);
     struct stat st;
-    if (stat(file_path, &st) != 0) {
+    if (file_fd < 0 || fstat(file_fd, &st) != 0) {
+        if (file_fd >= 0) close(file_fd);
         fprintf(stderr, "seal: file not found: %s\n", file_path);
         return -1;
     }
+    close(file_fd);
 
     /* Write seal marker */
     char marker[LST_MAX_PATH];
     seal_marker_path(marker, sizeof(marker), file_path);
 
-    FILE *f = fopen(marker, "w");
+    FILE *f = lst_secure_fopen(marker, "w");
     if (!f) {
         fprintf(stderr, "seal: cannot write marker: %s\n", marker);
         return -1;
     }
 
     time_t now = time(NULL);
-    struct tm *t = gmtime(&now);
+    struct tm tm_buf;
+    struct tm *t = gmtime_r(&now, &tm_buf);
     char timestamp[64];
     strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", t);
 
@@ -52,17 +59,20 @@ int lst_seal(const char *file_path) {
     fprintf(f, "Size: %lld\n", (long long)st.st_size);
     fprintf(f, "Mtime: %ld\n", (long)st.st_mtime);
     fprintf(f, "Status: IMMUTABLE\n");
+    fchmod(fileno(f), S_IRUSR | S_IRGRP | S_IROTH);
     fclose(f);
 
     /* Set read-only: 444 */
     chmod(file_path, S_IRUSR | S_IRGRP | S_IROTH);
-    chmod(marker, S_IRUSR | S_IRGRP | S_IROTH);
 
     /* On Linux, try chattr +i */
 #ifdef __linux__
-    char cmd[LST_MAX_PATH + 32];
-    snprintf(cmd, sizeof(cmd), "chattr +i '%s' 2>/dev/null", file_path);
-    system(cmd);
+    pid_t pid = fork();
+    if (pid == 0) {
+        execl("/usr/bin/chattr", "chattr", "+i", file_path, (char *)NULL);
+        _exit(127);
+    }
+    if (pid > 0) waitpid(pid, NULL, 0);
 #endif
 
     return 0;
@@ -74,7 +84,7 @@ int lst_seal_verify(const char *file_path) {
     char marker[LST_MAX_PATH];
     seal_marker_path(marker, sizeof(marker), file_path);
 
-    FILE *f = fopen(marker, "r");
+    FILE *f = lst_secure_fopen(marker, "r");
     if (!f) return -1; /* no seal marker = not sealed */
 
     long stored_size = -1;
@@ -82,16 +92,26 @@ int lst_seal_verify(const char *file_path) {
     char line[512];
 
     while (fgets(line, sizeof(line), f)) {
-        if (strncmp(line, "Size: ", 6) == 0)
-            stored_size = atol(line + 6);
-        else if (strncmp(line, "Mtime: ", 7) == 0)
-            stored_mtime = atol(line + 7);
+        if (strncmp(line, "Size: ", 6) == 0) {
+            char *end;
+            long value = strtol(line + 6, &end, 10);
+            if (end != line + 6) stored_size = value;
+        } else if (strncmp(line, "Mtime: ", 7) == 0) {
+            char *end;
+            long value = strtol(line + 7, &end, 10);
+            if (end != line + 7) stored_mtime = value;
+        }
     }
     fclose(f);
 
     /* Verify current file matches */
+    int file_fd = open(file_path, O_RDONLY | O_NOFOLLOW);
     struct stat st;
-    if (stat(file_path, &st) != 0) return -1;
+    if (file_fd < 0 || fstat(file_fd, &st) != 0) {
+        if (file_fd >= 0) close(file_fd);
+        return -1;
+    }
+    close(file_fd);
 
     if ((long)st.st_size != stored_size) {
         fprintf(stderr, "seal: INTEGRITY VIOLATION — size mismatch: %s\n", file_path);
@@ -114,14 +134,15 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     chmod(file_path, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 
     /* Append amendment */
-    FILE *f = fopen(file_path, "a");
+    FILE *f = lst_secure_fopen(file_path, "a");
     if (!f) {
         fprintf(stderr, "seal: cannot open for amendment: %s\n", file_path);
         return -1;
     }
 
     time_t now = time(NULL);
-    struct tm *t = gmtime(&now);
+    struct tm tm_buf;
+    struct tm *t = gmtime_r(&now, &tm_buf);
     char timestamp[64];
     strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", t);
 

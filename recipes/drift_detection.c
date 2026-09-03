@@ -88,7 +88,7 @@ static const char *NNOS_DAEMONS[] = {
  * -------------------------------------------------------------------------- */
 
 static char *read_file_dft(const char *path, size_t *out_len) {
-    FILE *f = fopen(path, "rb");
+    FILE *f = lst_secure_fopen(path, "rb");
     if (!f) return NULL;
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
@@ -483,7 +483,7 @@ static void write_line_dft(FILE *f) {
 
 static void write_report(lst_artifact_t *art, drift_ctx_t *ctx,
                           uint32_t initial_issues, const char *outpath) {
-    FILE *f = fopen(outpath, "w");
+    FILE *f = lst_secure_fopen(outpath, "w");
     if (!f) {
         fprintf(stderr, "drift-detection: cannot write %s\n", outpath);
         return;
@@ -498,7 +498,8 @@ static void write_report(lst_artifact_t *art, drift_ctx_t *ctx,
     fprintf(f, "Path: %s\n", art->project_path);
 
     time_t now = time(NULL);
-    struct tm *t = gmtime(&now);
+    struct tm tm_buf;
+    struct tm *t = gmtime_r(&now, &tm_buf);
     char ts[64];
     strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S UTC", t);
     fprintf(f, "Generated: %s\n", ts);

@@ -33,12 +33,12 @@ int lst_store_write(const lst_artifact_t *art, const char *store_dir) {
     if (!art || !store_dir) return -1;
 
     /* Ensure store directory exists */
-    mkdir(store_dir, 0755);
+    mkdir(store_dir, S_IRWXU);
 
     char path[LST_MAX_PATH];
     store_path(path, sizeof(path), store_dir, art->project_name);
 
-    FILE *f = fopen(path, "wb");
+    FILE *f = lst_secure_fopen(path, "wb");
     if (!f) {
         fprintf(stderr, "store: cannot write %s\n", path);
         return -1;
@@ -61,7 +61,7 @@ lst_artifact_t *lst_store_read(const char *store_dir, const char *project_name) 
     char path[LST_MAX_PATH];
     store_path(path, sizeof(path), store_dir, project_name);
 
-    FILE *f = fopen(path, "rb");
+    FILE *f = lst_secure_fopen(path, "rb");
     if (!f) return NULL;
 
     lst_artifact_t *art = calloc(1, sizeof(lst_artifact_t));

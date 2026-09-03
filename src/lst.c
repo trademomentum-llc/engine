@@ -13,11 +13,34 @@
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <ctype.h>
 
 /* --------------------------------------------------------------------------
  * Internal helpers
  * -------------------------------------------------------------------------- */
+
+FILE *lst_secure_fopen(const char *path, const char *mode) {
+    if (!path || !mode) return NULL;
+    const char *component = path;
+    while ((component = strstr(component, "..")) != NULL) {
+        if ((component == path || component[-1] == '/') &&
+            (component[2] == '\0' || component[2] == '/'))
+            return NULL;
+        component += 2;
+    }
+    int flags;
+    if (mode[0] == 'r') flags = O_RDONLY;
+    else if (mode[0] == 'a') flags = O_WRONLY | O_CREAT | O_APPEND;
+    else if (mode[0] == 'w') flags = O_WRONLY | O_CREAT | O_TRUNC;
+    else return NULL;
+    int fd = open(path, flags, S_IRUSR | S_IWUSR);
+    if (fd < 0) return NULL;
+    FILE *f = fdopen(fd, mode);
+    if (!f) close(fd);
+    return f;
+}
 
 /* Safe string copy into fixed buffer */
 static void scopy(char *dst, const char *src, size_t maxlen) {
@@ -39,7 +62,7 @@ static void strim(char *s) {
 
 /* Read entire file into malloc'd buffer. Caller frees. Returns NULL on fail. */
 static char *read_file(const char *path, size_t *out_len) {
-    FILE *f = fopen(path, "rb");
+    FILE *f = lst_secure_fopen(path, "rb");
     if (!f) return NULL;
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);

@@ -112,7 +112,7 @@ static const char *BENCH_SCRIPT_NAMES[] = {
  * -------------------------------------------------------------------------- */
 
 static char *read_file_ben(const char *path, size_t *out_len) {
-    FILE *f = fopen(path, "rb");
+    FILE *f = lst_secure_fopen(path, "rb");
     if (!f) return NULL;
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
@@ -299,7 +299,7 @@ static void write_ben_report(const char *report_path, lst_artifact_t *art,
                              ben_scan_result_t *scan, int critical,
                              int errors, int warnings, int infos,
                              float score, int pass) {
-    FILE *f = fopen(report_path, "w");
+    FILE *f = lst_secure_fopen(report_path, "w");
     if (!f) return;
 
     for (int i = 0; i < 70; i++) fputc('=', f);
