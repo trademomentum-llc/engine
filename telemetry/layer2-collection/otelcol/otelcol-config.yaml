@@ -1,0 +1,74 @@
+# ============================================================================
+# AetherOS Telemetry Plane — Layer 2: OTel Collector (otelcol-contrib)
+# Routes aether-collect OTLP traffic to per-signal backends:
+#   metrics -> Prometheus exporter (:9464, scraped by Layer 3)
+#   traces  -> Jaeger all-in-one OTLP ingest (Layer 4)
+#   logs    -> Loki push API (Layer 5)
+# Pinned binary: otelcol-contrib v0.119.0 (see VERSIONS.md)
+# ============================================================================
+
+# --- Receivers ---------------------------------------------------------------
+# aether-collect drains SEB rings and speaks OTLP/gRPC to this endpoint.
+# Bound to 0.0.0.0 so other QEMU guests / the host (via hostfwd) may push too.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+# --- Processors --------------------------------------------------------------
+# memory_limiter first: hard backpressure ceiling so the collector can never
+# OOM the guest (4GB QEMU lab image). batch second: amortize per-request cost.
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+    spike_limit_mib: 64
+  batch:
+    timeout: 1s
+    send_batch_size: 512
+
+# --- Exporters ---------------------------------------------------------------
+exporters:
+  # Layer 3: Prometheus scrapes this endpoint every 5s (prometheus.yml).
+  prometheus:
+    endpoint: 0.0.0.0:9464
+    resource_to_telemetry_conversion:
+      enabled: true   # expose resource attrs (service.name etc.) as labels
+
+  # Layer 4: Jaeger all-in-one OTLP/gRPC ingest on :14317.
+  # SPEC AMEND-001 (ratified): Jaeger OTLP gRPC moved off 4317 because this
+  # collector's own OTLP receiver owns 0.0.0.0:4317 and both run in the same
+  # guest. Guest-local hop only; no hostfwd required for 14317.
+  otlp/jaeger:
+    endpoint: localhost:14317
+    tls:
+      insecure: true   # localhost-only lab link; no PKI in the guest
+
+  # Layer 5: Loki push API (single-binary, filesystem storage).
+  loki:
+    endpoint: http://localhost:3100/loki/api/v1/push
+    default_labels_enabled:
+      exporter: false
+      job: true
+
+# --- Service -----------------------------------------------------------------
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp/jaeger]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [loki]
+  # Collector self-telemetry: Prometheus scrapes :9464 above; keep internal
+  # logs at info so they can be teed into Loki by the guest journal bridge.
+  telemetry:
+    logs:
+      level: info

@@ -1,0 +1,134 @@
+{
+  "uid": "aether-overview",
+  "title": "AetherOS Telemetry Plane — Overview",
+  "description": "Deterministic 7-layer plane dashboard: SEB ring health (Layer 1), trace entry point (Layer 4), log volume (Layer 5), integrity alerts (Layer 6). Static panels only; no external template variables.",
+  "tags": ["aether", "telemetry-plane"],
+  "timezone": "utc",
+  "editable": true,
+  "graphTooltip": 0,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {"from": "now-1h", "to": "now"},
+  "templating": {"list": []},
+  "annotations": {"list": []},
+  "links": [
+    {
+      "type": "link",
+      "title": "Jaeger trace search",
+      "url": "http://localhost:16686/search",
+      "targetBlank": true,
+      "icon": "external link"
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "SEB ring depth (bytes in ring)",
+      "description": "Layer 1: bytes currently held in each SEB ring, exported by aether-collect via OTLP. 65536 = full; sustained growth means the consumer is behind.",
+      "datasource": {"type": "prometheus", "uid": "aether-prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "fieldConfig": {
+        "defaults": {"unit": "bytes", "min": 0, "max": 65536},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "aether-prometheus"},
+          "expr": "aether_seb_ring_depth_bytes",
+          "legendFormat": "{{ring}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "SEB dropped events (total)",
+      "description": "Layer 1 overflow counter. Must be 0 in steady state; >0 means producers outran aether-collect or a ring is orphaned. Thresholds: green=0, red>0.",
+      "datasource": {"type": "prometheus", "uid": "aether-prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red", "value": 1}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "aether-prometheus"},
+          "expr": "sum(aether_seb_events_dropped_total)",
+          "legendFormat": "dropped"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "text",
+      "title": "Trace search (Jaeger, Layer 4)",
+      "description": "Entry point into distributed traces ingested by Jaeger all-in-one (OTLP gRPC :14317, UI :16686).",
+      "gridPos": {"h": 4, "w": 24, "x": 0, "y": 8},
+      "options": {
+        "mode": "markdown",
+        "content": "[Open Jaeger trace search](http://localhost:16686/search) — select a service emitted by an aetherProbe-instrumented process, then search. Traces reach Jaeger via otelcol's `otlp/jaeger` exporter."
+      },
+      "transparent": true
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Log volume by level",
+      "description": "Layer 5: SEB_LOG-derived entries in Loki, bucketed by level (DEBUG/INFO/WARN/ERROR/FATAL as emitted by aether_log levels 1-5).",
+      "datasource": {"type": "loki", "uid": "aether-loki"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "loki", "uid": "aether-loki"},
+          "expr": "sum by (level) (count_over_time({plane=\"aether\"} | json | level=~\".+\" [$__interval]))",
+          "legendFormat": "{{level}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Integrity alerts (last 1h)",
+      "description": "Layer 6: SEB_ALERT events from the integrity bridge (Wazuh FIM/rootcheck + osquery hash/port checks), counted over the dashboard window. Thresholds: green=0, yellow=1, red=5.",
+      "datasource": {"type": "prometheus", "uid": "aether-prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 1},
+              {"color": "red", "value": 5}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {"type": "prometheus", "uid": "aether-prometheus"},
+          "expr": "sum(increase(aether_alerts_total[1h]))",
+          "legendFormat": "alerts"
+        }
+      ]
+    }
+  ]
+}

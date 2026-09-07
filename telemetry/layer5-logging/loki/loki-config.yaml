@@ -1,0 +1,59 @@
+# ============================================================================
+# AetherOS Telemetry Plane — Layer 5: Grafana Loki (single-binary, monolithic)
+# Filesystem storage only — NO external object store (S3/GCS) anywhere.
+# Pinned binary: loki v3.4.0 (see VERSIONS.md)
+# ============================================================================
+
+auth_enabled: false
+
+# --- Server ------------------------------------------------------------------
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: info
+
+# --- Common (monolithic single process) --------------------------------------
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /var/lib/loki
+  replication_factor: 1          # single node: no ring replication
+  ring:
+    kvstore:
+      store: inmemory            # no Consul/etcd — one process, one guest
+
+# --- Schema: TSDB index on local filesystem ----------------------------------
+schema_config:
+  configs:
+    - from: 2026-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+storage_config:
+  tsdb_shipper:
+    active_index_directory: /var/lib/loki/index
+    cache_location: /var/lib/loki/index-cache
+  filesystem:
+    directory: /var/lib/loki/chunks
+
+# --- Limits + retention ------------------------------------------------------
+limits_config:
+  retention_period: 168h         # 7 days lab retention
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+  ingestion_rate_mb: 8
+  ingestion_burst_size_mb: 16
+
+# Compactor performs the actual retention deletions (filesystem store).
+compactor:
+  working_directory: /var/lib/loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem
+  compaction_interval: 10m
+  retention_delete_delay: 2h
+  retention_delete_worker_count: 50
+
+# Query frontend/ruler not deployed in the single-binary lab profile.

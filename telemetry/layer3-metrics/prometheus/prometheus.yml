@@ -1,0 +1,24 @@
+# ============================================================================
+# AetherOS Telemetry Plane — Layer 3: Prometheus
+# Deterministic lab config: static_configs only, no service discovery.
+# Pinned binary: prometheus v3.2.1 (see VERSIONS.md)
+# ============================================================================
+
+global:
+  scrape_interval: 5s        # deterministic lab interval (per SPEC)
+  evaluation_interval: 5s
+  external_labels:
+    plane: aether-telemetry
+    site: qemu-lab
+
+scrape_configs:
+  # Self-scrape: Prometheus's own process metrics.
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # OTel Collector prometheus exporter (Layer 2) — SEB-derived metrics,
+  # including ring depth and dropped-event counters.
+  - job_name: otelcol
+    static_configs:
+      - targets: ['localhost:9464']
