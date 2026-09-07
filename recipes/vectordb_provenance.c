@@ -55,10 +55,14 @@ static int run_curl(char *const argv[], char *output, size_t output_size) {
     }
     close(pipefd[1]);
     size_t total = 0;
-    while (total + 1 < output_size) {
-        ssize_t n = read(pipefd[0], output + total, output_size - total - 1);
+    char discard[4096];
+    for (;;) {
+        char *target = total + 1 < output_size ? output + total : discard;
+        size_t capacity = total + 1 < output_size ? output_size - total - 1
+                                                   : sizeof(discard);
+        ssize_t n = read(pipefd[0], target, capacity);
         if (n <= 0) break;
-        total += (size_t)n;
+        if (target == output + total) total += (size_t)n;
     }
     output[total] = '\0';
     close(pipefd[0]);
@@ -70,9 +74,28 @@ static int run_curl(char *const argv[], char *output, size_t output_size) {
 
 static void json_escape(char *dst, size_t size, const char *src) {
     size_t used = 0;
-    for (; *src && used + 2 < size; src++) {
-        if (*src == '"' || *src == '\\') dst[used++] = '\\';
-        dst[used++] = *src;
+    for (; *src; src++) {
+        unsigned char c = (unsigned char)*src;
+        if (c == '"' || c == '\\') {
+            if (used + 2 >= size) break;
+            dst[used++] = '\\';
+            dst[used++] = (char)c;
+        } else if (c == '\b' || c == '\f' || c == '\n' ||
+                   c == '\r' || c == '\t') {
+            if (used + 2 >= size) break;
+            dst[used++] = '\\';
+            dst[used++] = (c == '\b') ? 'b' :
+                          (c == '\f') ? 'f' :
+                          (c == '\n') ? 'n' :
+                          (c == '\r') ? 'r' : 't';
+        } else if (c < 0x20) {
+            if (used + 6 >= size) break;
+            snprintf(dst + used, size - used, "\\u%04x", c);
+            used += 6;
+        } else {
+            if (used + 1 >= size) break;
+            dst[used++] = (char)c;
+        }
     }
     dst[used] = '\0';
 }

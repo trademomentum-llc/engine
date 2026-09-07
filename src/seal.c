@@ -69,7 +69,7 @@ int lst_seal(const char *file_path) {
 #ifdef __linux__
     pid_t pid = fork();
     if (pid == 0) {
-        execl("/usr/bin/chattr", "chattr", "+i", file_path, (char *)NULL);
+        execl("/usr/bin/chattr", "chattr", "+i", "--", file_path, (char *)NULL);
         _exit(127);
     }
     if (pid > 0) waitpid(pid, NULL, 0);
@@ -88,7 +88,7 @@ int lst_seal_verify(const char *file_path) {
     if (!f) return -1; /* no seal marker = not sealed */
 
     long stored_size = -1;
-    long stored_mtime __attribute__((unused)) = -1;
+    long stored_mtime = -1;
     char line[512];
 
     while (fgets(line, sizeof(line), f)) {
@@ -113,7 +113,7 @@ int lst_seal_verify(const char *file_path) {
     }
     close(file_fd);
 
-    if ((long)st.st_size != stored_size) {
+    if ((long)st.st_size != stored_size || (long)st.st_mtime != stored_mtime) {
         fprintf(stderr, "seal: INTEGRITY VIOLATION — size mismatch: %s\n", file_path);
         return -1;
     }

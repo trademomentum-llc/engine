@@ -31,12 +31,26 @@ FILE *lst_secure_fopen(const char *path, const char *mode) {
         component += 2;
     }
     int flags;
+    int writing = 0;
     if (mode[0] == 'r') flags = O_RDONLY;
-    else if (mode[0] == 'a') flags = O_WRONLY | O_CREAT | O_APPEND;
-    else if (mode[0] == 'w') flags = O_WRONLY | O_CREAT | O_TRUNC;
+    else if (mode[0] == 'a') {
+        flags = O_WRONLY | O_CREAT | O_APPEND;
+        writing = 1;
+    } else if (mode[0] == 'w') {
+        flags = O_WRONLY | O_CREAT | O_TRUNC;
+        writing = 1;
+    }
     else return NULL;
-    int fd = open(path, flags, S_IRUSR | S_IWUSR);
+    int fd = open(path, flags | O_CLOEXEC | O_NOFOLLOW,
+                  S_IRUSR | S_IWUSR);
     if (fd < 0) return NULL;
+    if (writing) {
+        struct stat st;
+        if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+            close(fd);
+            return NULL;
+        }
+    }
     FILE *f = fdopen(fd, mode);
     if (!f) close(fd);
     return f;
