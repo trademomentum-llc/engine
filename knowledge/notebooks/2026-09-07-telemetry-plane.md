@@ -1,8 +1,8 @@
 ---
 title: "Telemetry Plane — 2026-09-07"
 date: 2026-09-07
-generated_at: "2026-09-07T20:45:00Z"
-event_count: 10
+generated_at: "2026-09-07T22:00:00Z"
+event_count: 14
 source: "session:2026-09-07-aetheros-telemetry"
 ---
 
@@ -10,11 +10,11 @@ source: "session:2026-09-07-aetheros-telemetry"
 
 ## Summary
 
-This notebook records 10 action event(s) for 2026-09-07, spanning 2026-09-07T19:28:56Z to 2026-09-07T20:45:00Z UTC.
+This notebook records 14 action event(s) for 2026-09-07, spanning 2026-09-07T19:28:56Z to 2026-09-07T22:00:00Z UTC.
 
-- Actions: created: 6, decided: 1, verified: 3
-- Layers: knowledge, procedures, recon, telemetry
-- Actors: kimi-orchestrator, subagent:docs-writer, subagent:kg-engineer, subagent:telemetry-engineer, subagent:verifier
+- Actions: created: 7, decided: 2, modified: 1, verified: 4
+- Layers: compiler, knowledge, procedures, recon, telemetry
+- Actors: kimi-orchestrator, subagent:docs-writer, subagent:kg-engineer, subagent:req-writers-x4, subagent:research-dims, subagent:telemetry-engineer, subagent:transition-editor, subagent:verifier
 
 ## Timeline
 
@@ -30,6 +30,10 @@ This notebook records 10 action event(s) for 2026-09-07, spanning 2026-09-07T19:
 | 20:20:00 | subagent:verifier | knowledge | verified | temporal-knowledge-graph deliverables | Independent verification of the notebook compiler |
 | 20:30:00 | kimi-orchestrator | telemetry | verified | engine:telemetry/ C + configs | Main-agent gate re-run |
 | 20:45:00 | kimi-orchestrator | knowledge | created | engine:knowledge/ | Cataloged the session and compiled the first knowledgebase notebook |
+| 21:00:00 | subagent:research-dims | recon | verified | engine + apps + NeuroDiOS repos | Gathered binding source material across three research dimensions |
+| 21:05:00 | kimi-orchestrator | compiler | decided | jstarc.agent.outline.md | Designed the execution outline for the Jasterish C compiler full-OS requirements document |
+| 21:40:00 | subagent:req-writers-x4 | compiler | created | jstarc_sec01..04.md | Drafted the full requirements document in four parallel writer passes |
+| 22:00:00 | subagent:transition-editor | compiler | modified | jstarc.agent.final.md | Transition-edited and merged the requirements document |
 
 ## Actions
 
@@ -418,6 +422,157 @@ Self-hosting the doctrine: the action-cataloging mandate is exercised on the wav
 2. python3 -m temporal_kg notebook --input knowledge/actions/2026-09-07-telemetry-plane.jsonl --out-dir knowledge/notebooks --title 'Telemetry Plane'
 3. sha256sum the compiled notebooks into knowledge/HASHES.sha256
 
+### AETH-2026-09-07-0012 — Gathered binding source material across three research dimensions
+
+- **Actor:** subagent:research-dims
+- **Layer:** recon
+- **Action:** verified
+- **Target:** engine + apps + NeuroDiOS repos
+- **Recorded at:** 2026-09-07T21:00:00Z
+- **Valid from:** 2026-09-07T21:00:00Z
+
+**Rationale**
+
+Recon-before-build. Key findings: house conventions distilled from the two surviving requirements docs; nnos/docs triads were removed from engine HEAD (commit a492a29, confidential documentation) and are now lineage references only; corrected buffer capacities (input/output/text 262144 B each, datasec 2097152 B); corrected self-host ladder jstar1..jstar5 with canonical invariant jstar4 == jstar5 byte-identical; existing NeuroDiOS/compiler/jstar/jstar_c.c C port carries the same ELF defects the new requirements must remediate.
+
+**Inputs**
+
+- engine repo main + pre-deletion commit 119ebef
+- apps repo src/jstar
+
+**Outputs**
+
+- research/jstarc_dim01.md
+- research/jstarc_dim02.md
+- research/jstarc_dim03.md
+
+**Hashes**
+
+| Path | SHA-256 |
+| --- | --- |
+| research/jstarc_dim01.md | `sha256:9c51ae57cd5a43713b9447dbe602cc70a23a70a7a37c53b225d3e3548f955726` |
+| research/jstarc_dim02.md | `sha256:d6496e8b26d6bcfb2143fee9627011cfb36817c520966b19db2e53e15d3aaba1` |
+| research/jstarc_dim03.md | `sha256:b19b02b7d49b31fed0a2f58e19dd82dbc2f9c503a2727450f57b888e0bdf3bfc` |
+
+**Replication Steps**
+
+1. Fetch and distill house conventions from surviving REQ docs
+2. Extract kernel/OS target constraints from JMK sources and specs
+3. Extract 8 denominators verbatim + binary optimization plan defects + provenance contract
+
+### AETH-2026-09-07-0011 — Designed the execution outline for the Jasterish C compiler full-OS requirements document
+
+- **Actor:** kimi-orchestrator
+- **Layer:** compiler
+- **Action:** decided
+- **Target:** jstarc.agent.outline.md
+- **Recorded at:** 2026-09-07T21:05:00Z
+- **Valid from:** 2026-09-07T21:05:00Z
+
+**Rationale**
+
+Spec-first doctrine: the outline is the writer contract. Twenty chapters mapped onto the house skeleton (front matter, themed FR groups, fixed tail) after research confirmed house conventions: FR-<GROUP>-NN IDs, must/should modality, fixed tail sections, no RFC-2119 shall.
+
+**Inputs**
+
+- report-writing skill
+- house conventions from prior triads
+
+**Outputs**
+
+- jstarc.agent.outline.md
+
+**Hashes**
+
+| Path | SHA-256 |
+| --- | --- |
+| jstarc.agent.outline.md | `sha256:e4a930035db54bd26b5cb7b368156b064faab7712e0d522f8bcc9dc714daa212` |
+
+**Replication Steps**
+
+1. Read report-writing outline.md
+2. Design 20-chapter outline with 4-level headings and per-chapter word/table targets
+3. Save jstarc.agent.outline.md
+
+### AETH-2026-09-07-0013 — Drafted the full requirements document in four parallel writer passes
+
+- **Actor:** subagent:req-writers-x4
+- **Layer:** compiler
+- **Action:** created
+- **Target:** jstarc_sec01..04.md
+- **Recorded at:** 2026-09-07T21:40:00Z
+- **Valid from:** 2026-09-07T21:40:00Z
+
+**Rationale**
+
+One chapter-set per writer per the report-writing pipeline; parallel dispatch safe because the outline fixed all shared definitions and FR group allocations. 201 functional requirements across 20 groups plus 31 non-functional requirements produced.
+
+**Inputs**
+
+- jstarc.agent.outline.md
+- research dims 01-03
+- swarm task specs (verbatim)
+- SPEC.md
+
+**Outputs**
+
+- jstarc_sec01.md
+- jstarc_sec02.md
+- jstarc_sec03.md
+- jstarc_sec04.md
+
+**Hashes**
+
+| Path | SHA-256 |
+| --- | --- |
+| jstarc_sec01.md | `sha256:155cd89e22e5855d4bc2b6feb0319da753128377be0f1f3a76d3877b081912a2` |
+| jstarc_sec02.md | `sha256:96fd61432772450a8501ccfefe7f63aa7f898808237f7de85227b06eefbc20f3` |
+| jstarc_sec03.md | `sha256:5e4efb550d3c68b113de672e55a81909344da16773cebfa6d31a53fff7bdf26b` |
+| jstarc_sec04.md | `sha256:d80fa102125a48a6812d243bd45b9fce3d358f875bbccd5fbcf270ce0cbedfe6` |
+
+**Replication Steps**
+
+1. Dispatch 4 writers with resolved system prompts (house conventions inline)
+2. W1 front matter+constraints, W2 frontend, W3 backend+self-host, W4 integration+tail
+3. Validate each output against FR-ID and table contracts
+
+### AETH-2026-09-07-0014 — Transition-edited and merged the requirements document
+
+- **Actor:** subagent:transition-editor
+- **Layer:** compiler
+- **Action:** modified
+- **Target:** jstarc.agent.final.md
+- **Recorded at:** 2026-09-07T22:00:00Z
+- **Valid from:** 2026-09-07T22:00:00Z
+
+**Rationale**
+
+Cross-chapter coherence gate. Fixed a section-numbering collision (sec01 ch.3/4 demoted to 1.5/1.6), harmonized cross-references, resolved four cross-file issues: array/for-loop capability mandated with surface syntax deferred to AMEND-001 in the DS volume; FR-ELF-08 strip offset derived from e_phnum (64+56*N) with 120-byte legacy as documented transitional exception; ladder invariant wording unified; capacities verified consistent. FR-EFF-04/FR-RT-10 strength conflict resolved by cross-reference.
+
+**Inputs**
+
+- jstarc_sec01..04.md
+
+**Outputs**
+
+- jstarc.agent.final.md
+- jstarc_transition_report.md
+
+**Hashes**
+
+| Path | SHA-256 |
+| --- | --- |
+| jstarc.agent.final.md | `sha256:dbfd8e34ba746c3617284cd89bdfd0957435f50a6d1d0a1ec276ae2732571598` |
+| jstarc_transition_report.md | `sha256:4d6455ad1b7449a91dab01edb9cea339f81ed00b268186963c78db7f6fdb317f` |
+
+**Replication Steps**
+
+1. Verify numbering continuity 1-17
+2. Harmonize cross-reference syntax
+3. Apply 4 surgical cross-file resolutions
+4. Deduplicate and census FR IDs
+5. Concatenate UTF-8 strict into final
+
 ## Artifacts & Hashes
 
 | Path | SHA-256 |
@@ -427,9 +582,19 @@ Self-hosting the doctrine: the action-cataloging mandate is exercised on the wav
 | docs/architecture/TELEMETRY_PLANE.md | `sha256:2ee3a83c72fe78cdd4a088a3826ddb216d201176a5813373e80b6554abeea71f` |
 | docs/procedures/FIRST_PRINCIPLES_OPERATING_DOCTRINE.md | `sha256:f7bfa9acb6879b33817a0313010ae686056b8ac412b964f611f0c9b99787ddc4` |
 | examples/telemetry_plane_actions.jsonl | `sha256:0019f246da534821add203a5a9a9a3e0d6c27f8c10f1eef4ff4a37023d0803aa` |
+| jstarc.agent.final.md | `sha256:dbfd8e34ba746c3617284cd89bdfd0957435f50a6d1d0a1ec276ae2732571598` |
+| jstarc.agent.outline.md | `sha256:e4a930035db54bd26b5cb7b368156b064faab7712e0d522f8bcc9dc714daa212` |
+| jstarc_sec01.md | `sha256:155cd89e22e5855d4bc2b6feb0319da753128377be0f1f3a76d3877b081912a2` |
+| jstarc_sec02.md | `sha256:96fd61432772450a8501ccfefe7f63aa7f898808237f7de85227b06eefbc20f3` |
+| jstarc_sec03.md | `sha256:5e4efb550d3c68b113de672e55a81909344da16773cebfa6d31a53fff7bdf26b` |
+| jstarc_sec04.md | `sha256:d80fa102125a48a6812d243bd45b9fce3d358f875bbccd5fbcf270ce0cbedfe6` |
+| jstarc_transition_report.md | `sha256:4d6455ad1b7449a91dab01edb9cea339f81ed00b268186963c78db7f6fdb317f` |
 | knowledge/actions/2026-09-07-telemetry-plane.jsonl | `sha256:SELF-REFERENTIAL-AT-WRITE` |
 | knowledge/notebooks/2026-09-07-telemetry-plane.md | `sha256:computed-post-compile` |
 | knowledge/notebooks/INDEX.md | `sha256:computed-post-compile` |
+| research/jstarc_dim01.md | `sha256:9c51ae57cd5a43713b9447dbe602cc70a23a70a7a37c53b225d3e3548f955726` |
+| research/jstarc_dim02.md | `sha256:d6496e8b26d6bcfb2143fee9627011cfb36817c520966b19db2e53e15d3aaba1` |
+| research/jstarc_dim03.md | `sha256:b19b02b7d49b31fed0a2f58e19dd82dbc2f9c503a2727450f57b888e0bdf3bfc` |
 | schemas/action_event.schema.json | `sha256:6557f46864b2ed9a0b78502672eeb5a76e6f6a449b474846a3a3f5c4a783b201` |
 | telemetry/BRINGUP.md | `sha256:d28ecbad001db1e4901ff96346d98968f3d365c99fe8118695dba2b463ad161a` |
 | telemetry/HASHES.sha256 | `sha256:a7e808949de8130bcffbdf1a10a182405fc94046e5ede0bee62e90f802782b2d` |
@@ -460,7 +625,7 @@ Self-hosting the doctrine: the action-cataloging mandate is exercised on the wav
 
 ## Provenance
 
-- Input SHA-256: `b77a9facb10bad37fcf76313bf9b2312eeb1237b3d1f4d63d172e761de7b1c11`
-- Events in this notebook: 10
-- Total input events: 10
+- Input SHA-256: `83e687b82e516776883c2bcf1e953dcfa1e741864ccfa7ef641bd8bd4cbb59b8`
+- Events in this notebook: 14
+- Total input events: 14
 - Compiler: `temporal_kg.notebook` (stdlib-only, deterministic; no wall-clock reads)
