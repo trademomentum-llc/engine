@@ -72,7 +72,10 @@ int lst_seal(const char *file_path) {
         execl("/usr/bin/chattr", "chattr", "+i", "--", file_path, (char *)NULL);
         _exit(127);
     }
-    if (pid > 0) waitpid(pid, NULL, 0);
+    if (pid > 0) {
+        int status = 0;
+        (void)waitpid(pid, &status, 0);
+    }
 #endif
 
     return 0;
