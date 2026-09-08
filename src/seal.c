@@ -159,8 +159,11 @@ int lst_seal(const char *file_path) {
     struct tm tm_buf;
     struct tm *t = gmtime_r(&now, &tm_buf);
     char timestamp[64];
-    strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", t);
-
+    if (t) {
+        strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", t);
+    } else {
+        snprintf(timestamp, sizeof(timestamp), "1970-01-01T00:00:00Z");
+    }
     fprintf(f, "Sealed: %s\n", timestamp);
     fprintf(f, "File: %s\n", file_path);
     fprintf(f, "Size: %lld\n", (long long)st.st_size);
