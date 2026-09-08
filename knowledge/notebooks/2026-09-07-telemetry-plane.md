@@ -658,7 +658,7 @@ _No artifact hashes recorded._
 
 ## Provenance
 
-- Input SHA-256: `dce0096e8525595829470fc3c97ffb2448d3a443ff8506656766ad8c36b513ff`
+- Input SHA-256: `5a9dd58ea406e2f31b3e073986684def1b65b64ccd0db9074a901f353fe6a815`
 - Events in this notebook: 15
-- Total input events: 18
+- Total input events: 22
 - Compiler: `temporal_kg.notebook` (stdlib-only, deterministic; no wall-clock reads)
