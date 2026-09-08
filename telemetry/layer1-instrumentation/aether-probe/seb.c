@@ -14,33 +14,47 @@
 #include <time.h>
 #include <errno.h>
 
+static void seb_path(const char* name, char* buf, size_t cap) {
+    snprintf(buf, cap, "/dev/shm/seb_%s", name);
+}
+
 static int seb_fd(const char* name, int flags) {
     char path[256];
-    snprintf(path, sizeof(path), "/dev/shm/seb_%s", name);
+    seb_path(name, path, sizeof(path));
     return open(path, flags, 0644);
 }
 
 struct seb_ring* seb_create(const char* name) {
-    int fd = seb_fd(name, O_RDWR | O_CREAT | O_EXCL);
+    char path[256];
+    seb_path(name, path, sizeof(path));
+
+    int fd = open(path, O_RDWR | O_CREAT | O_EXCL, 0644);
     if (fd < 0) {
         if (errno == EEXIST) {
             return seb_open(name);
         }
         return NULL;
     }
-    
+
     size_t total = sizeof(struct seb_ring) + SEB_RING_SIZE;
     if (ftruncate(fd, total) < 0) {
+        /* Do not leave a zero-length shm file behind: it would poison
+         * later seb_create/seb_open attempts for this name. */
         close(fd);
+        unlink(path);
         return NULL;
     }
-    
+
     void* mem = mmap(NULL, total, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    close(fd);
-    
+
     if (mem == MAP_FAILED) {
+        /* Full-size but uninitialized file would trip magic checks /
+         * SIGBUS later — remove it before failing. */
+        close(fd);
+        unlink(path);
         return NULL;
     }
+    close(fd);
     
     struct seb_ring* ring = mem;
     ring->magic = SEB_MAGIC;
@@ -90,6 +104,15 @@ bool seb_publish(struct seb_ring* ring, uint8_t type,
     
     uint64_t head = ring->head;
     uint64_t tail = ring->tail;
+
+    /* Inconsistent/corrupt ring state: head-tail must fit in the ring.
+     * Refuse to write — computing availability on an underflowed value
+     * would report huge free space and overwrite unread data. */
+    if (head < tail || head - tail > ring->size) {
+        ring->dropped++;
+        return false;
+    }
+
     uint64_t available = ring->size - (head - tail);
     
     uint16_t event_size = sizeof(struct seb_event) - SEB_MAX_PAYLOAD + len;
@@ -134,10 +157,15 @@ bool seb_consume(struct seb_ring* ring, struct seb_event* out) {
     if (head == tail) {
         return false;  /* Empty */
     }
-    
+
+    if (head < tail) {
+        ring->tail = head;  /* Corruption — reset */
+        return false;
+    }
+
     uint8_t* data = (uint8_t*)(ring + 1);
     uint64_t offset = tail % ring->size;
-    
+
     struct seb_event header;
     if (offset + sizeof(header) <= ring->size) {
         memcpy(&header, data + offset, sizeof(header));
@@ -146,14 +174,28 @@ bool seb_consume(struct seb_ring* ring, struct seb_event* out) {
         memcpy(&header, data + offset, first);
         memcpy((uint8_t*)&header + first, data, sizeof(header) - first);
     }
-    
+
     if (header.magic != SEB_MAGIC) {
         ring->tail = head;  /* Corruption — reset */
         return false;
     }
-    
-    uint16_t event_size = sizeof(struct seb_event) - SEB_MAX_PAYLOAD + header.len;
-    
+
+    /* Never trust the on-ring length: a forged header with a matching magic
+     * but oversized len would wrap event_size and drive memcpy out of
+     * bounds. Validate before computing/copying — same reset policy. */
+    if (header.len > SEB_MAX_PAYLOAD) {
+        ring->tail = head;  /* Corruption — reset */
+        return false;
+    }
+
+    uint32_t event_size = (uint32_t)(sizeof(struct seb_event) - SEB_MAX_PAYLOAD)
+                          + header.len;
+
+    if ((uint64_t)event_size > head - tail) {
+        ring->tail = head;  /* Corruption — beyond committed bytes, reset */
+        return false;
+    }
+
     if (offset + event_size <= ring->size) {
         memcpy(out, data + offset, event_size);
     } else {
@@ -161,10 +203,10 @@ bool seb_consume(struct seb_ring* ring, struct seb_event* out) {
         memcpy(out, data + offset, first);
         memcpy((uint8_t*)out + first, data, event_size - first);
     }
-    
+
     __sync_synchronize();
     ring->tail = tail + event_size;
-    
+
     return true;
 }
 
@@ -179,10 +221,15 @@ bool seb_peek(struct seb_ring* ring, struct seb_event* out) {
     if (head == tail) {
         return false;
     }
-    
+
+    if (head < tail) {
+        ring->tail = head;  /* Corruption — reset */
+        return false;
+    }
+
     uint8_t* data = (uint8_t*)(ring + 1);
     uint64_t offset = tail % ring->size;
-    
+
     struct seb_event header;
     if (offset + sizeof(header) <= ring->size) {
         memcpy(&header, data + offset, sizeof(header));
@@ -191,9 +238,26 @@ bool seb_peek(struct seb_ring* ring, struct seb_event* out) {
         memcpy(&header, data + offset, first);
         memcpy((uint8_t*)&header + first, data, sizeof(header) - first);
     }
-    
-    uint16_t event_size = sizeof(struct seb_event) - SEB_MAX_PAYLOAD + header.len;
-    
+
+    /* Same validation as seb_consume: never trust an on-ring length.
+     * Peek does not advance tail on success, but corruption still resets. */
+    if (header.magic != SEB_MAGIC) {
+        ring->tail = head;  /* Corruption — reset */
+        return false;
+    }
+    if (header.len > SEB_MAX_PAYLOAD) {
+        ring->tail = head;  /* Corruption — reset */
+        return false;
+    }
+
+    uint32_t event_size = (uint32_t)(sizeof(struct seb_event) - SEB_MAX_PAYLOAD)
+                          + header.len;
+
+    if ((uint64_t)event_size > head - tail) {
+        ring->tail = head;  /* Corruption — beyond committed bytes, reset */
+        return false;
+    }
+
     if (offset + event_size <= ring->size) {
         memcpy(out, data + offset, event_size);
     } else {

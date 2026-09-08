@@ -19,6 +19,8 @@
 
 #define TEST_RING     "test"
 #define TEST_RING_OVF "test-overflow"
+#define TEST_RING_COR "test-corrupt"
+#define TEST_RING_INC "test-inconsistent"
 #define N_EVENTS      1000
 
 static int failures = 0;
@@ -179,10 +181,117 @@ static void test_overflow_drops(void) {
     cleanup_ring(TEST_RING_OVF);
 }
 
+/* Case 3 (T1): forged header — magic matches but len=0xFFFF. seb_consume
+ * must detect the invalid length, reset (tail==head) and return false
+ * without copying out of bounds or crashing. */
+static void test_corrupt_header_len(void) {
+    bool ok = true;
+    cleanup_ring(TEST_RING_COR);
+
+    struct seb_ring* ring = seb_create(TEST_RING_COR);
+    if (!ring) {
+        printf("test_corrupt_header_len: FAIL (seb_create returned NULL)\n");
+        failures++;
+        return;
+    }
+
+    /* Commit one small valid event, then poison its on-ring length field. */
+    const char* msg = "{\"seq\":0}";
+    if (!seb_publish(ring, SEB_LOG, msg, (uint16_t)strlen(msg))) {
+        printf("  setup publish failed\n");
+        ok = false;
+    }
+
+    uint8_t* data = (uint8_t*)(ring + 1);
+    struct seb_event* on_ring = (struct seb_event*)data;
+    if (on_ring->magic != SEB_MAGIC) {
+        printf("  setup: on-ring magic mismatch\n");
+        ok = false;
+    }
+    on_ring->len = 0xFFFF;  /* Forged: magic valid, length impossible */
+    uint64_t head_before = ring->head;
+
+    struct seb_event ev;
+    memset(&ev, 0xAA, sizeof(ev));
+    if (seb_consume(ring, &ev)) {
+        printf("  seb_consume accepted forged header (len=0xFFFF)\n");
+        ok = false;
+    }
+    if (ring->tail != ring->head || ring->tail != head_before) {
+        printf("  corruption reset wrong: tail=%llu head=%llu\n",
+               (unsigned long long)ring->tail,
+               (unsigned long long)ring->head);
+        ok = false;
+    }
+
+    /* Ring must still be usable after the reset. */
+    if (!seb_publish(ring, SEB_METRIC, msg, (uint16_t)strlen(msg)) ||
+        !seb_consume(ring, &ev) || ev.len != strlen(msg)) {
+        printf("  ring unusable after corruption reset\n");
+        ok = false;
+    }
+
+    report("test_corrupt_header_len", ok);
+    seb_close(ring);
+    cleanup_ring(TEST_RING_COR);
+}
+
+/* Case 4 (T2): inconsistent head/tail (head - tail > ring->size) must make
+ * seb_publish refuse the write and count a drop, never overwrite data. */
+static void test_inconsistent_state_publish(void) {
+    bool ok = true;
+    cleanup_ring(TEST_RING_INC);
+
+    struct seb_ring* ring = seb_create(TEST_RING_INC);
+    if (!ring) {
+        printf("test_inconsistent_state_publish: FAIL (seb_create NULL)\n");
+        failures++;
+        return;
+    }
+
+    /* Simulate corrupt state: used bytes exceed ring capacity. */
+    ring->head = ring->size + 128;
+    ring->tail = 0;
+    uint64_t dropped_before = ring->dropped;
+    uint64_t head_before = ring->head;
+
+    const char* msg = "{\"x\":1}";
+    if (seb_publish(ring, SEB_METRIC, msg, (uint16_t)strlen(msg))) {
+        printf("  publish succeeded despite head-tail > ring->size\n");
+        ok = false;
+    }
+    if (ring->dropped != dropped_before + 1) {
+        printf("  dropped not incremented: %llu -> %llu\n",
+               (unsigned long long)dropped_before,
+               (unsigned long long)ring->dropped);
+        ok = false;
+    }
+    if (ring->head != head_before) {
+        printf("  head advanced on refused publish: %llu -> %llu\n",
+               (unsigned long long)head_before,
+               (unsigned long long)ring->head);
+        ok = false;
+    }
+
+    /* Also verify the head < tail variant. */
+    ring->head = 0;
+    ring->tail = 16;
+    if (seb_publish(ring, SEB_METRIC, msg, (uint16_t)strlen(msg))) {
+        printf("  publish succeeded despite head < tail\n");
+        ok = false;
+    }
+
+    report("test_inconsistent_state_publish", ok);
+    seb_close(ring);
+    cleanup_ring(TEST_RING_INC);
+}
+
 int main(void) {
     printf("=== SEB ring verification (SPEC Layer 1) ===\n");
     test_publish_consume_1000();
     test_overflow_drops();
+    test_corrupt_header_len();
+    test_inconsistent_state_publish();
     printf("=== %s (%d failure%s) ===\n",
            failures == 0 ? "ALL PASS" : "FAILURES",
            failures, failures == 1 ? "" : "s");
