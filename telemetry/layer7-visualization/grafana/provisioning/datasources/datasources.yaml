@@ -1,0 +1,32 @@
+# ============================================================================
+# AetherOS Telemetry Plane — Layer 7: Grafana provisioned datasources
+# All three backends are guest-loopback; Grafana reaches them on localhost.
+# Pinned: grafana v11.5.1 (see VERSIONS.md)
+# ============================================================================
+apiVersion: 1
+
+datasources:
+  # Layer 3 — Metrics
+  - name: Prometheus
+    uid: aether-prometheus
+    type: prometheus
+    access: proxy
+    url: http://localhost:9090
+    isDefault: true
+    editable: false
+
+  # Layer 4 — Traces (Jaeger query HTTP API; UI also on :16686)
+  - name: Jaeger
+    uid: aether-jaeger
+    type: jaeger
+    access: proxy
+    url: http://localhost:16686
+    editable: false
+
+  # Layer 5 — Logs
+  - name: Loki
+    uid: aether-loki
+    type: loki
+    access: proxy
+    url: http://localhost:3100
+    editable: false

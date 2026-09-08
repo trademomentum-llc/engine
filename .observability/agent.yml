@@ -8,6 +8,14 @@ test:
       - ./nnos/neurodios/jasterish-microkernel/scripts/smoke_aarch64.sh
     parser: shell-exit
     timeout: 120
+  - name: seb-ring
+    command:
+      - make
+      - -C
+      - telemetry
+      - test
+    parser: shell-exit
+    timeout: 60
 build:
   - name: aarch64-kernel
     command:
@@ -17,8 +25,32 @@ build:
     cwd: nnos/neurodios/jasterish-microkernel
     parser: shell-exit
     timeout: 120
+  - name: telemetry-plane
+    command:
+      - make
+      - -C
+      - telemetry
+    parser: shell-exit
+    timeout: 120
 artifacts:
   - name: jmk-bin
     path: nnos/neurodios/jasterish-microkernel/jmk.bin
   - name: jmk-elf
     path: nnos/neurodios/jasterish-microkernel/jmk.elf
+telemetry:
+  plane: aether-7-layer
+  spec: docs/architecture/TELEMETRY_PLANE.md
+  doctrine: docs/procedures/FIRST_PRINCIPLES_OPERATING_DOCTRINE.md
+  layers:
+    instrumentation: telemetry/layer1-instrumentation/aether-probe
+    collection_routing: telemetry/layer2-collection
+    metrics: telemetry/layer3-metrics/prometheus
+    tracing: telemetry/layer4-tracing/jaeger
+    logging: telemetry/layer5-logging/loki
+    integrity_security: telemetry/layer6-integrity
+    visualization: telemetry/layer7-visualization/grafana
+  knowledge:
+    actions: knowledge/actions
+    notebooks: knowledge/notebooks
+    hashes: knowledge/HASHES.sha256
+  environment: emulated (QEMU guest-native; no Docker)
