@@ -459,20 +459,15 @@ static void scan_file_lsa(lst_artifact_t *art, const char *fpath) {
         char *eol = strchr(line_start, '\n');
         if (eol) *eol = '\0';
 
-        /* Skip comments */
-        const char *stripped = line_start;
-        while (*stripped == ' ' || *stripped == '\t') stripped++;
-        if (*stripped != '#' && *stripped != '/' && *stripped != '*') {
-            check_antipattern_db_on_edge(art, fpath, line_start, lineno);
-            check_antipattern_cuda_on_m1(art, fpath, line_start, lineno);
-            check_antipattern_ml_on_nuc(art, fpath, line_start, lineno);
-            check_secret_placement(art, fpath, line_start, lineno);
-            check_encryption_standard(art, fpath, line_start, lineno);
-            check_breathing_room(art, fpath, line_start, lineno);
-            check_workload_routing(art, fpath, line_start, lineno);
-            check_state_ownership(art, fpath, line_start, lineno);
-            check_hybrid_sync(art, fpath, line_start, lineno);
-        }
+        check_antipattern_db_on_edge(art, fpath, line_start, lineno);
+        check_antipattern_cuda_on_m1(art, fpath, line_start, lineno);
+        check_antipattern_ml_on_nuc(art, fpath, line_start, lineno);
+        check_secret_placement(art, fpath, line_start, lineno);
+        check_encryption_standard(art, fpath, line_start, lineno);
+        check_breathing_room(art, fpath, line_start, lineno);
+        check_workload_routing(art, fpath, line_start, lineno);
+        check_state_ownership(art, fpath, line_start, lineno);
+        check_hybrid_sync(art, fpath, line_start, lineno);
 
         if (!eol) break;
         line_start = eol + 1;
@@ -546,8 +541,8 @@ static int recipe_lsa_compliance(lst_artifact_t *art, const char *output_dir) {
 
     /* Header */
     write_sep_lsa(f);
-    fprintf(f, "LSA-SPEC-002 COMPLIANCE VALIDATION REPORT\n");
-    fprintf(f, "Spec Version: 2.0.0\n");
+    fprintf(f, "LSA SPEC COMPLIANCE REPORT\n");
+    fprintf(f, "Reference: LSA-SPEC-002 v2.0.0 (TP-HCF)\n");
     fprintf(f, "Project: %s\n", art->project_name);
     fprintf(f, "Path: %s\n", art->project_path);
 
@@ -565,29 +560,27 @@ static int recipe_lsa_compliance(lst_artifact_t *art, const char *output_dir) {
     write_sep_lsa(f);
     fprintf(f, "\n");
 
-    /* Node inventory */
-    fprintf(f, "NODE INVENTORY REFERENCE\n");
+    /* Architecture reference */
+    fprintf(f, "ARCHITECTURE REFERENCE\n");
     write_line_lsa(f);
+    fprintf(f, "  Execution Classes:\n");
+    fprintf(f, "    E1 Deterministic Control -> NUC (DCN)\n");
+    fprintf(f, "    E2 Parallel Numerical    -> M1 (HCN) / Orin (EPN)\n");
+    fprintf(f, "    E3 Real-Time Reactive    -> Orin (EPN)\n");
     fprintf(f, "\n");
-    fprintf(f, "  DCN (NUC - Deterministic Control Node):\n");
-    for (int i = 0; DCN_DAEMONS[i]; i++)
-        fprintf(f, "    - %s\n", DCN_DAEMONS[i]);
-    fprintf(f, "\n");
-    fprintf(f, "  HCN (M1 - Hybrid Cognitive Node):\n");
-    for (int i = 0; HCN_DAEMONS[i]; i++)
-        fprintf(f, "    - %s\n", HCN_DAEMONS[i]);
-    fprintf(f, "\n");
-    fprintf(f, "  EPN (Orin - Edge Parallel Node):\n");
-    for (int i = 0; EPN_DAEMONS[i]; i++)
-        fprintf(f, "    - %s\n", EPN_DAEMONS[i]);
+    fprintf(f, "  Core Constants:\n");
+    fprintf(f, "    phi_inverse            = 0.618034\n");
+    fprintf(f, "    complementarity_zone   = 0.382\n");
+    fprintf(f, "    breathing_room_thresh  = 0.382\n");
     fprintf(f, "\n");
 
     /* Findings */
     if (new_issues > 0) {
-        fprintf(f, "COMPLIANCE VIOLATIONS\n");
+        fprintf(f, "VIOLATIONS\n");
         write_sep_lsa(f);
         fprintf(f, "\n");
 
+        /* Group by severity */
         for (int sev = SEV_CRITICAL; sev >= SEV_INFO; sev--) {
             int printed = 0;
             for (uint32_t i = initial_issues; i < art->issue_count; i++) {
@@ -609,45 +602,54 @@ static int recipe_lsa_compliance(lst_artifact_t *art, const char *output_dir) {
             }
         }
     } else {
-        fprintf(f, "COMPLIANCE VALIDATION: PASS\n");
-        fprintf(f, "  No LSA-SPEC-002 violations found.\n\n");
+        fprintf(f, "COMPLIANCE: PASS\n");
+        fprintf(f, "  No LSA spec violations found.\n\n");
     }
 
-    /* Compliance checklist */
-    fprintf(f, "COMPLIANCE CHECKLIST\n");
+    /* Anti-pattern checklist */
+    fprintf(f, "ANTI-PATTERN CHECKLIST (Section 2.5)\n");
     write_line_lsa(f);
-
-    int has_db_edge = 0, has_cuda_m1 = 0, has_ml_nuc = 0, has_secret_edge = 0;
-    int has_enc = 0, has_phi = 0, has_route = 0, has_own = 0, has_sync = 0;
+    int ap_db = 0, ap_cuda = 0, ap_ml = 0, ap_secrets = 0;
     for (uint32_t i = initial_issues; i < art->issue_count; i++) {
-        if (strstr(art->issues[i].title, "DB on Edge")) has_db_edge = 1;
-        if (strstr(art->issues[i].title, "CUDA on M1")) has_cuda_m1 = 1;
-        if (strstr(art->issues[i].title, "ML on NUC")) has_ml_nuc = 1;
-        if (strstr(art->issues[i].title, "Secrets on Edge")) has_secret_edge = 1;
-        if (strstr(art->issues[i].title, "Encryption")) has_enc = 1;
-        if (strstr(art->issues[i].title, "Phi")) has_phi = 1;
-        if (strstr(art->issues[i].title, "Misrouted")) has_route = 1;
-        if (strstr(art->issues[i].title, "Ownership")) has_own = 1;
-        if (strstr(art->issues[i].title, "Sync") || strstr(art->issues[i].title, "Orin Should")) has_sync = 1;
+        if (strstr(art->issues[i].title, "DB on Edge")) ap_db = 1;
+        if (strstr(art->issues[i].title, "CUDA on M1")) ap_cuda = 1;
+        if (strstr(art->issues[i].title, "ML on NUC")) ap_ml = 1;
+        if (strstr(art->issues[i].title, "Secrets on Edge")) ap_secrets = 1;
     }
+    fprintf(f, "  [%s] No DB hosting on Orin\n", ap_db ? "FAIL" : "PASS");
+    fprintf(f, "  [%s] No CUDA jobs on M1\n", ap_cuda ? "FAIL" : "PASS");
+    fprintf(f, "  [%s] No ML inference on NUC\n", ap_ml ? "FAIL" : "PASS");
+    fprintf(f, "  [%s] No secrets on edge nodes\n", ap_secrets ? "FAIL" : "PASS");
+    fprintf(f, "\n");
 
-    fprintf(f, "  [%s] No DB hosting on edge nodes (NFR-7.3.2)\n", has_db_edge ? "FAIL" : "PASS");
-    fprintf(f, "  [%s] No CUDA workloads on M1 (SEC-2.5)\n", has_cuda_m1 ? "FAIL" : "PASS");
-    fprintf(f, "  [%s] No ML inference on NUC (SEC-2.5)\n", has_ml_nuc ? "FAIL" : "PASS");
-    fprintf(f, "  [%s] Secrets not stored on edge (NFR-7.3.4)\n", has_secret_edge ? "FAIL" : "PASS");
-    fprintf(f, "  [%s] AES-256-GCM encryption standard (NFR-7.3.1)\n", has_enc ? "FAIL" : "PASS");
-    fprintf(f, "  [%s] Breathing room constants correct (SEC-5)\n", has_phi ? "FAIL" : "PASS");
-    fprintf(f, "  [%s] Workload routing correct (SEC-2.3)\n", has_route ? "FAIL" : "PASS");
-    fprintf(f, "  [%s] State ownership respected (SEC-4.1)\n", has_own ? "FAIL" : "PASS");
-    fprintf(f, "  [%s] Hybrid sync configured (FR-6.10)\n", has_sync ? "FAIL" : "PASS");
+    /* Hybrid sync policy */
+    fprintf(f, "SYNC POLICY (FR-6.10 + Tailscale Hybrid)\n");
+    write_line_lsa(f);
+    fprintf(f, "  LAN:       UDP multicast 239.73.78.69:20046 (preferred)\n");
+    fprintf(f, "  Remote:    Unicast UDP over Tailscale (100.x.x.x) fallback\n");
+    fprintf(f, "  Policy:    Tailscale only when peer is not on local network\n");
+    fprintf(f, "  Orin/EPN:  Must stay local (E3 latency: <50ms intervention)\n");
+    fprintf(f, "  M1/HCN:   May roam (E2 workloads are batch-tolerant)\n");
+    fprintf(f, "  NUC/DCN:  Stationary (source of truth, TCP:20047 for mobile)\n");
+    fprintf(f, "  Encryption: AES-256-GCM, key at /etc/lsa/sync.key (0600)\n");
+    fprintf(f, "\n");
+    int has_sync = 0, has_orin_remote = 0;
+    for (uint32_t i = initial_issues; i < art->issue_count; i++) {
+        if (strstr(art->issues[i].title, "Hybrid")) has_sync = 1;
+        if (strstr(art->issues[i].title, "Orin Should Stay")) has_orin_remote = 1;
+    }
+    fprintf(f, "  [%s] Hybrid sync (multicast + Tailscale fallback)\n",
+        has_sync ? "REVIEW" : "PASS");
+    fprintf(f, "  [%s] Orin stays on local network\n",
+        has_orin_remote ? "FAIL" : "PASS");
     fprintf(f, "\n");
 
     /* Footer */
     write_sep_lsa(f);
     fprintf(f, "END OF LSA COMPLIANCE REPORT\n");
-    fprintf(f, "\nThis report validates compliance with LSA-SPEC-002 v2.0.0\n");
-    fprintf(f, "Jason's Living System Architecture / TP-HCF\n");
-    fprintf(f, "Tri-Node: NUC (DCN) + M1 (HCN) + Orin (EPN)\n");
+    fprintf(f, "\nValidated against: Jason's Living System Architecture\n");
+    fprintf(f, "Tri-Plane Heterogeneous Compute Fabric (TP-HCF)\n");
+    fprintf(f, "Document: LSA-SPEC-002 v2.0.0 (2026-02-22)\n");
     write_sep_lsa(f);
     fprintf(f, "\n");
 
@@ -665,7 +667,7 @@ void recipe_lsa_compliance_register(void) {
     lst_recipe_t r = {0};
     snprintf(r.name, LST_MAX_NAME, "lsa-compliance");
     snprintf(r.description, LST_MAX_NAME,
-        "Validate LSA-SPEC-002 compliance (workload routing, security, daemons)");
+        "Validate against LSA-SPEC-002 TP-HCF architecture");
     r.execute = recipe_lsa_compliance;
     r.version = 1;
     lst_recipe_register(&r);
