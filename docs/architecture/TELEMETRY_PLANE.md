@@ -22,7 +22,7 @@
 | L3 | Metrics & Monitoring | Prometheus | otelcol prometheus exporter on `:9464`; `prometheus.yml` scrapes otelcol + node/port targets; server `:9090` |
 | L4 | Transaction Tracing | Jaeger | otelcol OTLP exporter → Jaeger all-in-one `:14317` (OTLP gRPC ingest, SPEC AMEND-001); UI `:16686` |
 | L5 | Logging & Aggregation | Grafana Loki | otelcol `otlphttp/loki` exporter → Loki 3.x native OTLP endpoint `http://localhost:3100/otlp` (the deprecated `loki` exporter is removed from otelcol-contrib v0.119.0) |
-| L6 | Integrity & Security | Wazuh + osquery | Wazuh manager `:1514`/`1515`; osquery FIM + process telemetry; drift/integrity alerts also emitted as `SEB_ALERT` into L1 |
+| L6 | Integrity & Security | Wazuh + osquery | Wazuh manager `:1514`/`:1515`; osquery FIM + process telemetry; drift/integrity alerts also emitted as `SEB_ALERT` into L1 |
 | L7 | Visualization | Grafana | `:3000`; provisioned datasources Prometheus (`:9090`), Jaeger (`:16686`), Loki (`:3100`); dashboard `aether-overview` |
 
 ### 1.3 Failure classes owned by the plane
@@ -221,7 +221,7 @@ hostfwd=tcp::9464-:9464 \
 | 3100 | 3100 | L5 | Loki | LogQL queries; push endpoint is guest-local (`localhost:3100/otlp` OTLP/HTTP) |
 | 9464 | 9464 | L2 | otelcol prometheus exporter | Direct scrape inspection/debug of collector output |
 
-5.2.1 Deliberately NOT forwarded: Wazuh `:1514`/`1515` (guest-internal integrity plane), otelcol receiver `:4317` and Jaeger OTLP ingest (guest-internal hops). Minimum-forwarded-surface is the security posture: the host reaches exactly the five read/inspect endpoints an operator needs.
+5.2.1 Deliberately NOT forwarded: Wazuh `:1514`/`:1515` (guest-internal integrity plane), otelcol receiver `:4317` and Jaeger OTLP ingest (guest-internal hops). Minimum-forwarded-surface is the security posture: the host reaches exactly the five read/inspect endpoints an operator needs.
 
 ### 5.3 No Docker, anywhere — challenge-assumption rationale (summary)
 
@@ -233,7 +233,7 @@ hostfwd=tcp::9464-:9464 \
 |---|------|----------------------|-----------------|
 | OI-1 | `:4317` contention — RESOLVED (SPEC AMEND-001, ratified) | otelcol (`0.0.0.0:4317` receiver) and Jaeger all-in-one could not co-bind `:4317` on one guest interface | AMEND-001 assigns Jaeger OTLP gRPC ingest `:14317`; reflected in §2.2/§2.4, `BRINGUP.md`, and `otelcol-config.yaml` |
 | OI-2 | SEB ring rendezvous | The ring's filesystem/shm rendezvous path between aetherProbe producers and aether-collect is not pinned in SPEC.md | To be fixed by the L1/L2 implementers and recorded in `BRINGUP.md`; must be a committed, absolute guest path |
-| OI-3 | Wazuh manager placement | SPEC pins ports `:1514`/`1515` but not whether the manager runs in-guest. Assumed in-guest for determinism (all other components are); probability moderate that a future wave wants an external manager | Confirm at integration; if external, amend this section and the determinism clause together |
+| OI-3 | Wazuh manager placement | SPEC pins ports `:1514`/`:1515` but not whether the manager runs in-guest. Assumed in-guest for determinism (all other components are); probability moderate that a future wave wants an external manager | Confirm at integration; if external, amend this section and the determinism clause together |
 
 ---
 
