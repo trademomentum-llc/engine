@@ -6,6 +6,9 @@
  * Store once, read by any recipe, any number of times.
  */
 
+#define _XOPEN_SOURCE 700
+#define _POSIX_C_SOURCE 200809L
+
 #include "lst.h"
 
 #include <stdio.h>
@@ -17,16 +20,37 @@
 /* Artifact file extension */
 #define LST_EXT ".lst"
 
-/* Build the store path for a given project name */
-static void store_path(char *dst, size_t maxlen, const char *store_dir, const char *project_name) {
-    /* Sanitize project name: replace / with _ */
+/* Build the store path for a given project name.
+ * Returns 0 on success, -1 if project_name is unsafe, -2 if store_dir
+ * cannot be canonicalized or the result would not fit (no silent
+ * truncation). */
+static int store_path(char *dst, size_t maxlen, const char *store_dir, const char *project_name) {
+    /* Reject traversal and hostile names outright */
+    if (!project_name || !project_name[0]) return -1;
+    if (project_name[0] == '.') return -1;              /* ".", "..", hidden   */
+    if (strstr(project_name, "..")) return -1;          /* parent traversal    */
+    if (strchr(project_name, '\\')) return -1;          /* alternate separator */
+    if (strlen(project_name) >= LST_MAX_NAME) return -1;
+    for (const unsigned char *p = (const unsigned char *)project_name; *p; p++)
+        if (*p < 0x20 || *p == 0x7f) return -1;         /* control chars       */
+
+    /* Sanitize project name: replace / with _ (unchanged for legitimate names) */
     char safe_name[LST_MAX_NAME];
     size_t i;
-    for (i = 0; project_name[i] && i < LST_MAX_NAME - 1; i++) {
+    for (i = 0; project_name[i]; i++) {
         safe_name[i] = (project_name[i] == '/') ? '_' : project_name[i];
     }
     safe_name[i] = '\0';
-    snprintf(dst, maxlen, "%s/%s%s", store_dir, safe_name, LST_EXT);
+
+    /* Canonicalize store_dir and confine the artifact inside it: dst is
+     * exactly <canonical store_dir>/<safe_name>.lst, and safe_name is a
+     * single benign component, so the result cannot escape the store. */
+    char *canon_dir = realpath(store_dir, NULL);
+    if (!canon_dir) return -2;
+    int n = snprintf(dst, maxlen, "%s/%s%s", canon_dir, safe_name, LST_EXT);
+    free(canon_dir);
+    if (n < 0 || (size_t)n >= maxlen) return -2;
+    return 0;
 }
 
 int lst_store_write(const lst_artifact_t *art, const char *store_dir) {
@@ -36,7 +60,15 @@ int lst_store_write(const lst_artifact_t *art, const char *store_dir) {
     mkdir(store_dir, 0755);
 
     char path[LST_MAX_PATH];
-    store_path(path, sizeof(path), store_dir, art->project_name);
+    int prc = store_path(path, sizeof(path), store_dir, art->project_name);
+    if (prc == -1) {
+        fprintf(stderr, "store: unsafe project name: %s\n", art->project_name);
+        return -1;
+    }
+    if (prc != 0) {
+        fprintf(stderr, "store: cannot write %s/%s%s\n", store_dir, art->project_name, LST_EXT);
+        return -1;
+    }
 
     FILE *f = fopen(path, "wb");
     if (!f) {
@@ -59,7 +91,8 @@ lst_artifact_t *lst_store_read(const char *store_dir, const char *project_name) 
     if (!store_dir || !project_name) return NULL;
 
     char path[LST_MAX_PATH];
-    store_path(path, sizeof(path), store_dir, project_name);
+    if (store_path(path, sizeof(path), store_dir, project_name) != 0)
+        return NULL;
 
     FILE *f = fopen(path, "rb");
     if (!f) return NULL;
@@ -80,7 +113,8 @@ lst_artifact_t *lst_store_read(const char *store_dir, const char *project_name) 
 
 int lst_store_is_current(const char *store_dir, const char *project_name) {
     char path[LST_MAX_PATH];
-    store_path(path, sizeof(path), store_dir, project_name);
+    if (store_path(path, sizeof(path), store_dir, project_name) != 0)
+        return 0;
 
     struct stat st;
     if (stat(path, &st) != 0) return 0; /* doesn't exist */

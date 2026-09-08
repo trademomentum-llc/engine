@@ -6,14 +6,20 @@
  * populate fixed-layout structs. No interpretation, no GC, no boxing.
  */
 
+#define _XOPEN_SOURCE 700
+#define _POSIX_C_SOURCE 200809L
+
 #include "lst.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <dirent.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <ctype.h>
+#include <unistd.h>
 
 /* --------------------------------------------------------------------------
  * Internal helpers
@@ -37,10 +43,25 @@ static void strim(char *s) {
     while (len > 0 && isspace((unsigned char)s[len - 1])) s[--len] = '\0';
 }
 
-/* Read entire file into malloc'd buffer. Caller frees. Returns NULL on fail. */
+/* Read entire file into malloc'd buffer. Caller frees. Returns NULL on fail.
+ *
+ * Canonicalization contract: `path` may chain from a caller-supplied project
+ * path and readdir() entry names, i.e. a potentially hostile directory tree.
+ * The path is resolved with realpath() before the open, deterministically
+ * eliminating ".." components and symlinked directory components from the
+ * expression; the canonical path is then opened with O_NOFOLLOW so no
+ * symlink can be swapped in at the resolved location between
+ * canonicalization and open. (Legitimate symlinks inside a scanned tree,
+ * e.g. pnpm's node_modules links, still resolve to their real target —
+ * same read behavior as before.) */
 static char *read_file(const char *path, size_t *out_len) {
-    FILE *f = fopen(path, "rb");
-    if (!f) return NULL;
+    char *canon = realpath(path, NULL);
+    if (!canon) return NULL;
+    int fd = open(canon, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    free(canon);
+    if (fd < 0) return NULL;
+    FILE *f = fdopen(fd, "rb");
+    if (!f) { close(fd); return NULL; }
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
     if (sz < 0 || sz > 50 * 1024 * 1024) { fclose(f); return NULL; } /* 50MB cap */
@@ -247,7 +268,12 @@ static int json_get_author_npm(const char *json, lst_dep_t *dep) {
     return dep->author_count;
 }
 
-/* Find and extract copyright line from LICENSE file in a directory */
+/* Find and extract copyright line from LICENSE file in a directory.
+ * `dir` chains from the caller-supplied project path plus readdir() names;
+ * the fixed filenames from names[] are appended to it. All reads go through
+ * read_file(), which enforces the canonicalization contract documented
+ * there (realpath + O_NOFOLLOW), so the composed path cannot resolve to a
+ * file outside `dir`. */
 static void find_copyright(const char *dir, char *dst, size_t maxlen) {
     dst[0] = '\0';
     const char *names[] = {

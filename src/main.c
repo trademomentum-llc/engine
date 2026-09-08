@@ -12,6 +12,9 @@
  *   engine amend <file_path> <text>          Amend a sealed file
  */
 
+#define _XOPEN_SOURCE 700
+#define _POSIX_C_SOURCE 200809L
+
 #include "lst.h"
 
 #include <stdio.h>
@@ -94,6 +97,31 @@ static int has_deps(const char *path) {
     snprintf(check, sizeof(check), "%s/Gemfile.lock", path);
     if (stat(check, &st) == 0) return 1;
 
+    return 0;
+}
+
+/* --------------------------------------------------------------------------
+ * CLI path canonicalization
+ *
+ * seal/verify/amend take paths straight from argv. Canonicalize once at the
+ * CLI boundary (realpath resolves ".."/symlinks; the file must exist — all
+ * three commands operate on existing files) and dispatch the canonical form.
+ * -------------------------------------------------------------------------- */
+
+static int canonicalize_cli_path(const char *path, char *dst, size_t maxlen) {
+    char *rp = realpath(path, NULL);
+    if (!rp) {
+        fprintf(stderr, "engine: cannot resolve path: %s\n", path);
+        return -1;
+    }
+    size_t len = strlen(rp);
+    if (len == 0 || len >= maxlen) {
+        free(rp);
+        fprintf(stderr, "engine: cannot resolve path: %s\n", path);
+        return -1;
+    }
+    memcpy(dst, rp, len + 1);
+    free(rp);
     return 0;
 }
 
@@ -278,14 +306,26 @@ int main(int argc, char *argv[]) {
     if (strcmp(cmd, "store") == 0 && argc >= 3 && strcmp(argv[2], "list") == 0)
         return cmd_store_list();
 
-    if (strcmp(cmd, "seal") == 0 && argc >= 3)
-        return lst_seal(argv[2]);
+    if (strcmp(cmd, "seal") == 0 && argc >= 3) {
+        char path[LST_MAX_PATH];
+        if (canonicalize_cli_path(argv[2], path, sizeof(path)) != 0)
+            return 1;
+        return lst_seal(path);
+    }
 
-    if (strcmp(cmd, "verify") == 0 && argc >= 3)
-        return lst_seal_verify(argv[2]);
+    if (strcmp(cmd, "verify") == 0 && argc >= 3) {
+        char path[LST_MAX_PATH];
+        if (canonicalize_cli_path(argv[2], path, sizeof(path)) != 0)
+            return 1;
+        return lst_seal_verify(path);
+    }
 
-    if (strcmp(cmd, "amend") == 0 && argc >= 4)
-        return lst_seal_amend(argv[2], argv[3]);
+    if (strcmp(cmd, "amend") == 0 && argc >= 4) {
+        char path[LST_MAX_PATH];
+        if (canonicalize_cli_path(argv[2], path, sizeof(path)) != 0)
+            return 1;
+        return lst_seal_amend(path, argv[3]);
+    }
 
     usage(argv[0]);
     return 1;
