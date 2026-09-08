@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 /*
  * pqc_validation.c — Post-Quantum Cryptography Validation Recipe
  *
@@ -352,9 +354,14 @@ static int recipe_pqc_validation(lst_artifact_t *art, const char *output_dir) {
     fprintf(f, "Path: %s\n", art->project_path);
 
     time_t now = time(NULL);
-    struct tm *t = gmtime(&now);
+    struct tm tm_buf;
+    struct tm *t = gmtime_r(&now, &tm_buf);
     char ts[64];
-    strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S UTC", t);
+    if (t) {
+        strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S UTC", t);
+    } else {
+        snprintf(ts, sizeof(ts), "1970-01-01 00:00:00 UTC");
+    }
     fprintf(f, "Generated: %s\n", ts);
     fprintf(f, "Sources Scanned: %d\n", sources_scanned);
     fprintf(f, "Key Files Found: %d\n", key_files);

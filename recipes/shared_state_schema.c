@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 /*
  * shared_state_schema.c -- Shared-State Schema Validation Recipe
  *
@@ -409,9 +411,14 @@ static int recipe_shared_state_schema(lst_artifact_t *art,
     fprintf(f, "Path: %s\n", art->project_path);
 
     time_t now = time(NULL);
-    struct tm *t = gmtime(&now);
+    struct tm tm_buf;
+    struct tm *t = gmtime_r(&now, &tm_buf);
     char ts[64];
-    strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S UTC", t);
+    if (t) {
+        strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S UTC", t);
+    } else {
+        snprintf(ts, sizeof(ts), "1970-01-01 00:00:00 UTC");
+    }
     fprintf(f, "Generated: %s\n", ts);
     fprintf(f, "Schema Issues Found: %u\n", new_issues);
     write_sep_sss(f);
