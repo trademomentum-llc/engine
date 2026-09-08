@@ -1,8 +1,8 @@
 ---
 title: "Telemetry Plane — 2026-09-07"
 date: 2026-09-07
-generated_at: "2026-09-07T22:00:00Z"
-event_count: 14
+generated_at: "2026-09-07T23:50:00Z"
+event_count: 15
 source: "session:2026-09-07-aetheros-telemetry"
 ---
 
@@ -10,9 +10,9 @@ source: "session:2026-09-07-aetheros-telemetry"
 
 ## Summary
 
-This notebook records 14 action event(s) for 2026-09-07, spanning 2026-09-07T19:28:56Z to 2026-09-07T22:00:00Z UTC.
+This notebook records 15 action event(s) for 2026-09-07, spanning 2026-09-07T19:28:56Z to 2026-09-07T23:50:00Z UTC.
 
-- Actions: created: 7, decided: 2, modified: 1, verified: 4
+- Actions: created: 7, decided: 2, modified: 1, verified: 5
 - Layers: compiler, knowledge, procedures, recon, telemetry
 - Actors: kimi-orchestrator, subagent:docs-writer, subagent:kg-engineer, subagent:req-writers-x4, subagent:research-dims, subagent:telemetry-engineer, subagent:transition-editor, subagent:verifier
 
@@ -34,6 +34,7 @@ This notebook records 14 action event(s) for 2026-09-07, spanning 2026-09-07T19:
 | 21:05:00 | kimi-orchestrator | compiler | decided | jstarc.agent.outline.md | Designed the execution outline for the Jasterish C compiler full-OS requirements document |
 | 21:40:00 | subagent:req-writers-x4 | compiler | created | jstarc_sec01..04.md | Drafted the full requirements document in four parallel writer passes |
 | 22:00:00 | subagent:transition-editor | compiler | modified | jstarc.agent.final.md | Transition-edited and merged the requirements document |
+| 23:50:00 | kimi-orchestrator | telemetry | verified | engine PR #3 review surface | Triaged 21 security and correctness review threads from CodeQL, Copilot, and Codex |
 
 ## Actions
 
@@ -573,6 +574,38 @@ Cross-chapter coherence gate. Fixed a section-numbering collision (sec01 ch.3/4 
 4. Deduplicate and census FR IDs
 5. Concatenate UTF-8 strict into final
 
+### AETH-2026-09-07-0015 — Triaged 21 security and correctness review threads from CodeQL, Copilot, and Codex
+
+- **Actor:** kimi-orchestrator
+- **Layer:** telemetry
+- **Action:** verified
+- **Target:** engine PR #3 review surface
+- **Recorded at:** 2026-09-07T23:50:00Z
+- **Valid from:** 2026-09-07T23:50:00Z
+
+**Rationale**
+
+Deterministic safety decisions: every automated finding enumerated and classified before any fix. CodeQL: 3 potentially-overflowing snprintf alerts in probe.c. Copilot and Codex: SEB ring length-validation and state-consistency gaps in seb.c; unchecked snprintf chains, odd-count out-of-bounds reads, and unescaped JSON interpolation in probe.c; deprecated loki exporter absent from pinned otelcol-contrib 0.119.0; collector self-telemetry port confusion; missing Grafana dashboard provisioning; three-space hash manifest separator breaking sha256sum -c; stale Jaeger 4317 references; wave-2 scope misrepresentation in BRINGUP; broken markdown code span in VERSIONS. Also found: OSSAR workflow uses the archived end-of-life github/ossar-action (fails in about 3s) — flagged for principal decision rather than unilaterally removed (consensus before destructive actions).
+
+**Inputs**
+
+- PR #3 review threads (21)
+- check runs (CodeQL failure, OSSAR failure, Semgrep and Socket success)
+
+**Outputs**
+
+- triage mapping posted to engine PR #3
+
+**Hashes**
+
+_No artifact hashes recorded._
+
+**Replication Steps**
+
+1. pull_request_read get_review_comments perPage 100
+2. pull_request_read get_check_runs
+3. read .github/workflows/ossar.yml to diagnose the EOL action
+
 ## Artifacts & Hashes
 
 | Path | SHA-256 |
@@ -625,7 +658,7 @@ Cross-chapter coherence gate. Fixed a section-numbering collision (sec01 ch.3/4 
 
 ## Provenance
 
-- Input SHA-256: `83e687b82e516776883c2bcf1e953dcfa1e741864ccfa7ef641bd8bd4cbb59b8`
-- Events in this notebook: 14
-- Total input events: 14
+- Input SHA-256: `dce0096e8525595829470fc3c97ffb2448d3a443ff8506656766ad8c36b513ff`
+- Events in this notebook: 15
+- Total input events: 18
 - Compiler: `temporal_kg.notebook` (stdlib-only, deterministic; no wall-clock reads)
