@@ -117,7 +117,7 @@ int lst_seal_verify(const char *file_path) {
     close(file_fd);
 
     if ((long)st.st_size != stored_size || (long)st.st_mtime != stored_mtime) {
-        fprintf(stderr, "seal: INTEGRITY VIOLATION — size mismatch: %s\n", file_path);
+        fprintf(stderr, "seal: INTEGRITY VIOLATION — size/mtime mismatch: %s\n", file_path);
         return -1;
     }
 
