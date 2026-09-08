@@ -20,9 +20,9 @@
 | L1 | Instrumentation | aetherProbe C SDK + OpenTelemetry SDKs | Fixed C API (`seb.h`, `probe.h`); OTel SDKs for managed services |
 | L2 | Collection & Routing | aether-collect + OpenTelemetry Collector (otelcol) | aether-collect drains SEB rings → OTLP gRPC to otelcol `0.0.0.0:4317`; otelcol routes by signal |
 | L3 | Metrics & Monitoring | Prometheus | otelcol prometheus exporter on `:9464`; `prometheus.yml` scrapes otelcol + node/port targets; server `:9090` |
-| L4 | Transaction Tracing | Jaeger | otelcol OTLP exporter → Jaeger all-in-one `:4317` (OTLP gRPC ingest); UI `:16686` |
-| L5 | Logging & Aggregation | Grafana Loki | otelcol loki exporter → `http://localhost:3100/loki/api/v1/push` |
-| L6 | Integrity & Security | Wazuh + osquery | Wazuh manager `:1514`/`:1515`; osquery FIM + process telemetry; drift/integrity alerts also emitted as `SEB_ALERT` into L1 |
+| L4 | Transaction Tracing | Jaeger | otelcol OTLP exporter → Jaeger all-in-one `:14317` (OTLP gRPC ingest, SPEC AMEND-001); UI `:16686` |
+| L5 | Logging & Aggregation | Grafana Loki | otelcol `otlphttp/loki` exporter → Loki 3.x native OTLP endpoint `http://localhost:3100/otlp` (the deprecated `loki` exporter is removed from otelcol-contrib v0.119.0) |
+| L6 | Integrity & Security | Wazuh + osquery | Wazuh manager `:1514`/`1515`; osquery FIM + process telemetry; drift/integrity alerts also emitted as `SEB_ALERT` into L1 |
 | L7 | Visualization | Grafana | `:3000`; provisioned datasources Prometheus (`:9090`), Jaeger (`:16686`), Loki (`:3100`); dashboard `aether-overview` |
 
 ### 1.3 Failure classes owned by the plane
@@ -53,10 +53,10 @@ Each subsection states: purpose, component, data contract, interfaces, failure m
 | **Purpose** | Drain L1 rings and route each signal type (metrics, traces, logs) to its layer-appropriate backend |
 | **Component** | aether-collect (`telemetry/layer2-collection/aether-collect/collect.c`) + OpenTelemetry Collector (`telemetry/layer2-collection/otelcol/otelcol-config.yaml`) |
 | **Data contract** | aether-collect consumes `struct seb_event` records from every registered SEB ring and re-emits them as OTLP. otelcol receives OTLP and routes by signal: metrics → L3 exporter, traces → L4 exporter, logs → L5 exporter |
-| **Interfaces** | aether-collect → otelcol: OTLP gRPC to `0.0.0.0:4317`. otelcol exporters: prometheus on `:9464` (to L3), OTLP gRPC to Jaeger `:4317` (to L4), loki HTTP push to `http://localhost:3100/loki/api/v1/push` (to L5) |
-| **Failure modes** | (a) otelcol down → aether-collect backpressures into the ring; sustained outage surfaces as rising `dropped` at L1 — the failure is visible in L3 as the `dropped` metric; (b) malformed event (bad magic) — skipped and counted; (c) misrouted signal — detectable by absence at exactly one backend, presence at otelcol `:9464` self-metrics |
+| **Interfaces** | aether-collect → otelcol: OTLP gRPC to `0.0.0.0:4317`. otelcol exporters: prometheus on `:9464` (to L3), OTLP gRPC to Jaeger `:14317` (to L4, SPEC AMEND-001), OTLP/HTTP to Loki `http://localhost:3100/otlp` (to L5) |
+| **Failure modes** | (a) otelcol down → aether-collect backpressures into the ring; sustained outage surfaces as rising `dropped` at L1 — the failure is visible in L3 as the `dropped` metric; (b) malformed event (bad magic) — skipped and counted; (c) misrouted signal — detectable by absence at exactly one backend, presence at otelcol self-metrics (`:8888`, internal telemetry endpoint) |
 | **Verification probe** | Publish a known metric + trace + log via `probe.h`; confirm the metric appears on `:9464`, the trace in Jaeger UI `:16686`, the log via Loki query at `:3100`. Config must parse under `yaml.safe_load` (Verification gate 3) |
-| **Open item** | **Port note (honest uncertainty, Doctrine 4.6):** the SPEC records otelcol's OTLP gRPC receiver on `0.0.0.0:4317` and Jaeger all-in-one's OTLP gRPC ingest also on `:4317`. Co-locating both processes on one guest interface creates a high probability of bind contention. The contract is recorded here exactly as ratified; resolution requires a SPEC amendment (e.g., Jaeger OTLP gRPC on an alternate port) and MUST NOT be deviated from unilaterally. See §5.4. |
+| **Resolved item** | **Port contention — RESOLVED by SPEC AMEND-001 (ratified):** the SPEC originally recorded otelcol's OTLP gRPC receiver on `0.0.0.0:4317` and Jaeger all-in-one's OTLP gRPC ingest also on `:4317`, a certain bind conflict on one guest interface. AMEND-001 assigns Jaeger OTLP gRPC ingest to `:14317`; otelcol keeps `0.0.0.0:4317`. Reflected in §2.4, §3.1, §5.4, `BRINGUP.md`, and `otelcol-config.yaml`. |
 
 ### 2.3 Layer 3 — Metrics & Monitoring
 
@@ -76,8 +76,8 @@ Each subsection states: purpose, component, data contract, interfaces, failure m
 | **Purpose** | End-to-end trace of a transaction across instrumented components; the primary tool for causal (not merely correlational) diagnosis |
 | **Component** | Jaeger all-in-one, native run in guest (`telemetry/layer4-tracing/jaeger/README.md`) |
 | **Data contract** | OTLP trace protobufs ingested from otelcol; spans originate at L1 via `aether_trace_begin`/`aether_trace_end` (or OTel SDKs for managed services) |
-| **Interfaces** | Ingest: OTLP gRPC `:4317` (see §2.2 Open item). Query/UI: `:16686`. Consumed by L7 as provisioned datasource `Jaeger (:16686)` |
-| **Failure modes** | (a) Ingest down → otelcol exporter queue growth, visible in otelcol self-metrics at `:9464`; (b) broken span parentage from misused begin/end pairing — detected as orphan-span rate; (c) all-in-one in-memory store loses history on restart — accepted for this wave (single-guest dev topology), recorded here as a known limitation |
+| **Interfaces** | Ingest: OTLP gRPC `:14317` (SPEC AMEND-001, ratified — moved off `:4317`, which otelcol's own receiver owns). Query/UI: `:16686`. Consumed by L7 as provisioned datasource `Jaeger (:16686)` |
+| **Failure modes** | (a) Ingest down → otelcol exporter queue growth, visible in otelcol self-metrics at `:8888`; (b) broken span parentage from misused begin/end pairing — detected as orphan-span rate; (c) all-in-one in-memory store loses history on restart — accepted for this wave (single-guest dev topology), recorded here as a known limitation |
 | **Verification probe** | Emit a `aether_trace_begin`/`end` pair with a fixed test operation name; confirm the trace retrievable in the UI at `:16686` and via the Grafana Jaeger datasource |
 
 ### 2.5 Layer 5 — Logging & Aggregation
@@ -86,9 +86,9 @@ Each subsection states: purpose, component, data contract, interfaces, failure m
 |-----------|---------------|
 | **Purpose** | Centralized, queryable log aggregation; the narrative record around any failure the other layers detect |
 | **Component** | Grafana Loki (`telemetry/layer5-logging/loki/loki-config.yaml`) |
-| **Data contract** | Log entries pushed by otelcol loki exporter; entries originate at L1 via `aether_log(level 1..5)` (levels map to severity labels) |
-| **Interfaces** | Push: `http://localhost:3100/loki/api/v1/push`. Query: `:3100` (LogQL). Consumed by L7 as provisioned datasource `Loki (:3100)` |
-| **Failure modes** | (a) Push endpoint down → otelcol queue growth (`:9464` self-metrics); (b) label cardinality explosion — mitigated by low-cardinality labels only (level, source, layer); (c) storage growth unbounded — retention per committed `loki-config.yaml` |
+| **Data contract** | Log entries pushed by the otelcol `otlphttp/loki` exporter as OTLP logs; entries originate at L1 via `aether_log(level 1..5)` (levels map to severity labels) |
+| **Interfaces** | Push: OTLP/HTTP `http://localhost:3100/otlp` (Loki 3.x native OTLP, `/otlp/v1/logs`). Query: `:3100` (LogQL). Consumed by L7 as provisioned datasource `Loki (:3100)` |
+| **Failure modes** | (a) Push endpoint down → otelcol queue growth (`:8888` self-metrics); (b) label cardinality explosion — mitigated by low-cardinality labels only (level, source, layer); (c) storage growth unbounded — retention per committed `loki-config.yaml` |
 | **Verification probe** | Emit `aether_log(3, "...")` with a unique marker string; confirm retrievable by LogQL query at `:3100` within the scrape/push interval |
 
 ### 2.6 Layer 6 — Integrity & Security
@@ -136,10 +136,10 @@ Each subsection states: purpose, component, data contract, interfaces, failure m
               | (metrics)                    | (traces)                    | (logs)             |
               v                              v                             v                    |
       +---------------+              +---------------+             +------------------+       |
-      | prometheus    |   scrape     | OTLP gRPC     |   ingest    | loki exporter    | push  |
-      | exporter      | <=========== | exporter      | ==========> |                  | ======+
-      | :9464         |              | :4317         |             +------------------+  HTTP
-      +-------+-------+              +-------+-------+                          |  :3100/loki/api/v1/push
+      | prometheus    |   scrape     | OTLP gRPC     |   ingest    | otlphttp/loki    | push  |
+      | exporter      | <=========== | exporter      | ==========> | exporter         | ======+
+      | :9464         |              | :14317        |             +------------------+  HTTP
+      +-------+-------+              +-------+-------+                          |  :3100/otlp/v1/logs
               | /metrics                     |                                v
               v                              v                        +--------------+
       +---------------+              +---------------+                | Loki  :3100  |
@@ -218,10 +218,10 @@ hostfwd=tcp::9464-:9464 \
 | 3000 | 3000 | L7 | Grafana | Operator UI and API |
 | 9090 | 9090 | L3 | Prometheus | Query/API, targets inspection |
 | 16686 | 16686 | L4 | Jaeger | Trace UI; Grafana Jaeger datasource query port |
-| 3100 | 3100 | L5 | Loki | LogQL queries; push endpoint is guest-local (`localhost:3100/loki/api/v1/push`) |
+| 3100 | 3100 | L5 | Loki | LogQL queries; push endpoint is guest-local (`localhost:3100/otlp` OTLP/HTTP) |
 | 9464 | 9464 | L2 | otelcol prometheus exporter | Direct scrape inspection/debug of collector output |
 
-5.2.1 Deliberately NOT forwarded: Wazuh `:1514`/`:1515` (guest-internal integrity plane), otelcol receiver `:4317` and Jaeger OTLP ingest (guest-internal hops). Minimum-forwarded-surface is the security posture: the host reaches exactly the five read/inspect endpoints an operator needs.
+5.2.1 Deliberately NOT forwarded: Wazuh `:1514`/`1515` (guest-internal integrity plane), otelcol receiver `:4317` and Jaeger OTLP ingest (guest-internal hops). Minimum-forwarded-surface is the security posture: the host reaches exactly the five read/inspect endpoints an operator needs.
 
 ### 5.3 No Docker, anywhere — challenge-assumption rationale (summary)
 
@@ -231,9 +231,9 @@ hostfwd=tcp::9464-:9464 \
 
 | # | Item | Uncertainty statement | Resolution path |
 |---|------|----------------------|-----------------|
-| OI-1 | `:4317` contention | Probability is high that otelcol (`0.0.0.0:4317` receiver) and Jaeger all-in-one (`:4317` OTLP gRPC ingest) cannot co-bind on one guest interface. Contract recorded as ratified; no unilateral deviation | SPEC amendment assigning Jaeger OTLP gRPC an alternate port; then update §2.2/§2.4 and `BRINGUP.md` |
+| OI-1 | `:4317` contention — RESOLVED (SPEC AMEND-001, ratified) | otelcol (`0.0.0.0:4317` receiver) and Jaeger all-in-one could not co-bind `:4317` on one guest interface | AMEND-001 assigns Jaeger OTLP gRPC ingest `:14317`; reflected in §2.2/§2.4, `BRINGUP.md`, and `otelcol-config.yaml` |
 | OI-2 | SEB ring rendezvous | The ring's filesystem/shm rendezvous path between aetherProbe producers and aether-collect is not pinned in SPEC.md | To be fixed by the L1/L2 implementers and recorded in `BRINGUP.md`; must be a committed, absolute guest path |
-| OI-3 | Wazuh manager placement | SPEC pins ports `:1514`/`:1515` but not whether the manager runs in-guest. Assumed in-guest for determinism (all other components are); probability moderate that a future wave wants an external manager | Confirm at integration; if external, amend this section and the determinism clause together |
+| OI-3 | Wazuh manager placement | SPEC pins ports `:1514`/`1515` but not whether the manager runs in-guest. Assumed in-guest for determinism (all other components are); probability moderate that a future wave wants an external manager | Confirm at integration; if external, amend this section and the determinism clause together |
 
 ---
 

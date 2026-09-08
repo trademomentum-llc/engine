@@ -17,8 +17,17 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9090']
 
-  # OTel Collector prometheus exporter (Layer 2) — SEB-derived metrics,
-  # including ring depth and dropped-event counters.
+  # OTel Collector prometheus exporter (Layer 2) — SEB-derived pipeline
+  # metrics, including ring depth and dropped-event counters.
+  # NOTE: this endpoint does NOT serve the collector's own otelcol_*
+  # self-telemetry; that is the otelcol-self job below.
   - job_name: otelcol
     static_configs:
       - targets: ['localhost:9464']
+
+  # OTel Collector internal self-telemetry (otelcol_* process/pipeline
+  # metrics) served by the collector's own telemetry pull reader — see
+  # service.telemetry.metrics.readers in otelcol-config.yaml (:8888).
+  - job_name: otelcol-self
+    static_configs:
+      - targets: ['localhost:8888']

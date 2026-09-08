@@ -3,7 +3,7 @@
 # Routes aether-collect OTLP traffic to per-signal backends:
 #   metrics -> Prometheus exporter (:9464, scraped by Layer 3)
 #   traces  -> Jaeger all-in-one OTLP ingest (Layer 4)
-#   logs    -> Loki push API (Layer 5)
+#   logs    -> Loki 3.x native OTLP/HTTP endpoint (Layer 5)
 # Pinned binary: otelcol-contrib v0.119.0 (see VERSIONS.md)
 # ============================================================================
 
@@ -45,12 +45,17 @@ exporters:
     tls:
       insecure: true   # localhost-only lab link; no PKI in the guest
 
-  # Layer 5: Loki push API (single-binary, filesystem storage).
-  loki:
-    endpoint: http://localhost:3100/loki/api/v1/push
-    default_labels_enabled:
-      exporter: false
-      job: true
+  # Layer 5: Loki 3.x native OTLP/HTTP ingest (single-binary, filesystem
+  # storage). NOTE: the deprecated `loki` exporter was REMOVED from
+  # otelcol-contrib (absent in our pinned v0.119.0) — the collector would
+  # reject this config at startup if `loki` were still referenced. Loki 3.x
+  # (pinned v3.4.0) accepts OTLP logs natively at /otlp/v1/logs under the
+  # /otlp path prefix, so we route via the stock otlphttp exporter instead.
+  # Key names per otelcol-contrib 0.119.x: `endpoint`, `tls.insecure`.
+  otlphttp/loki:
+    endpoint: http://localhost:3100/otlp
+    tls:
+      insecure: true   # localhost-only lab link; no PKI in the guest
 
 # --- Service -----------------------------------------------------------------
 service:
@@ -66,9 +71,21 @@ service:
     logs:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [loki]
-  # Collector self-telemetry: Prometheus scrapes :9464 above; keep internal
-  # logs at info so they can be teed into Loki by the guest journal bridge.
+      exporters: [otlphttp/loki]
+  # Collector self-telemetry (otelcol_* process/pipeline metrics) is NOT
+  # served by the prometheus exporter on :9464 — :9464 carries only the
+  # pipeline's exported metrics. The collector's own metrics live on the
+  # internal telemetry endpoint, configured here (0.119.x syntax: a pull
+  # reader with an embedded prometheus exporter on host/port; the old
+  # `service.telemetry.metrics.address` key is gone). Layer 3 scrapes BOTH
+  # :9464 (pipeline) and :8888 (self-telemetry) — see prometheus.yml.
   telemetry:
     logs:
       level: info
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888

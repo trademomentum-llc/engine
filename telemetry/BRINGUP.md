@@ -43,8 +43,14 @@ sha256sum <artifact>            # compare against VERSIONS.md
 Unpack/install per component: otelcol-contrib → `/opt/aether/bin/otelcol-contrib`;
 prometheus → `/opt/aether/bin/prometheus` + `/etc/prometheus/prometheus.yml`;
 jaeger → per `layer4-tracing/jaeger/README.md`; loki → `/opt/aether/bin/loki`
-+ `/etc/loki/loki-config.yaml`; grafana → `/opt/grafana` with
-`conf/provisioning` replaced by `layer7-visualization/grafana/provisioning`;
++ `/etc/loki/loki-config.yaml`; grafana → `/opt/grafana` with BOTH provisioning
+trees installed: `layer7-visualization/grafana/provisioning/datasources` →
+`/opt/grafana/conf/provisioning/datasources` and
+`layer7-visualization/grafana/provisioning/dashboards` →
+`/opt/grafana/conf/provisioning/dashboards`, plus the dashboard JSON
+`layer7-visualization/grafana/dashboards/aether-overview.json` copied into
+`/opt/grafana/conf/provisioning/dashboards/` (the provider's `options.path`
+in `dashboards.yaml` points there);
 wazuh agent+manager 4.11.0 per upstream packages (agent config merged from
 `layer6-integrity/wazuh/ossec-agent.conf`); osquery deb +
 `/etc/osquery/osquery.conf` from `layer6-integrity/osquery/osquery.conf`.
@@ -92,7 +98,12 @@ osqueryd --config_path=/etc/osquery/osquery.conf --disable_events=false &
 # L7: visualization.
 /opt/grafana/bin/grafana-server --homepath=/opt/grafana &
 
-# Finally: drain SEB rings into the plane (Layer 1 -> 2).
+# Finally: drain SEB rings (Layer 1 -> 2). NOTE — WAVE-2 SCOPE:
+# aether-collect is STDOUT-ONLY this wave; it emits no OTLP, so the
+# L2 -> L7 forwarding path (otelcol routing into Prometheus/Jaeger/Loki)
+# carries no SEB-derived traffic yet. Layers 3/4/5/7 are still started and
+# verified for reachability so the wave-2 forwarding work lands on a
+# proven-runnable stack.
 /opt/aether/bin/aether-collect kernel daemon integrity &
 ```
 
@@ -103,10 +114,11 @@ osqueryd --config_path=/etc/osquery/osquery.conf --disable_events=false &
 | 1 SEB | `make test` → `./test-seb` | `ALL PASS`, exit 0 |
 | 1 SEB | `ls /dev/shm/seb_*` | one file per instrumented service |
 | 2 collect | `aether-collect <ring>` stdout | JSON event lines flowing |
-| 2 otelcol | `curl -sf localhost:9464/metrics \| head` | Prometheus exposition text incl. `otelcol_*` |
-| 3 prom | `curl -sf 'localhost:9090/api/v1/targets?state=active'` | `otelcol` + `prometheus` jobs `health:up` |
+| 2 otelcol | `curl -sf localhost:9464/metrics \| head` | Prometheus exposition text — PIPELINE metrics only (empty until OTLP traffic flows in wave 2) |
+| 2 otelcol | `curl -sf localhost:8888/metrics \| grep otelcol_` | collector SELF-telemetry (`otelcol_*`); do NOT expect `otelcol_*` on :9464 |
+| 3 prom | `curl -sf 'localhost:9090/api/v1/targets?state=active'` | `prometheus`, `otelcol` (:9464) + `otelcol-self` (:8888) jobs `health:up` |
 | 3 prom | `promtool check config /etc/prometheus/prometheus.yml` | `SUCCESS` |
-| 4 jaeger | `curl -sf localhost:16686/api/services` | JSON service list (otelcol appears once spans flow) |
+| 4 jaeger | `curl -sf localhost:16686/api/services` | REACHABILITY-ONLY this wave: HTTP 200 + valid JSON (may be an empty service list — aether-collect emits no OTLP spans until wave 2, so no service names are guaranteed) |
 | 5 loki | `curl -sf localhost:3100/ready` | `ready` |
 | 5 loki | `curl -sf -G localhost:3100/loki/api/v1/labels` | JSON label list |
 | 6 wazuh | `/var/ossec/bin/agent_control -l` (on manager) | agent `Active` |
@@ -114,10 +126,17 @@ osqueryd --config_path=/etc/osquery/osquery.conf --disable_events=false &
 | 7 grafana | from **host**: `curl -sf localhost:3000/api/health` | `{"database":"ok"}` |
 | 7 dash | from **host**: open `http://localhost:3000/d/aether-overview` | 5 panels render |
 
-End-to-end smoke: emit one event with any Layer 1 probe (or run `test-seb`
-against a live ring name), then confirm it appears in `aether-collect` stdout,
-in `:9464/metrics`, in Loki (`{plane="aether"}` query), and — for alerts — in
-the Grafana "Integrity alerts" panel.
+End-to-end smoke (THIS WAVE — L1 → L2 stdout capture only): emit one event
+with any Layer 1 probe (or run `test-seb` against a live ring name), then
+confirm it appears as a JSON event line in `aether-collect` stdout. That is
+the full guaranteed path this wave: aether-collect is stdout-only and emits
+no OTLP.
+
+**Wave-2 expectations (NOT guaranteed now):** once aether-collect gains OTLP
+emission, the same event must also appear in `:9464/metrics` (pipeline
+metrics), in Loki (LogQL query at `:3100`), as a trace in Jaeger (`:16686`,
+ingest on `:14317`), and — for alerts — in the Grafana "Integrity alerts"
+panel. Do not report those downstream sightings as pass/fail this wave.
 
 ## 5. Teardown
 

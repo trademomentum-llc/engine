@@ -21,6 +21,5 @@ fetched artifact) at bring-up, and the filled value committed back here.
 | osquery | 6 | 5.15.0 | `https://github.com/osquery/osquery/releases/download/5.15.0/osquery_5.15.0-1.linux_amd64.deb` | verify-at-fetch |
 | Grafana (OSS) | 7 | v11.5.1 | `https://dl.grafana.com/oss/release/grafana-11.5.1.linux-amd64.tar.gz` | verify-at-fetch |
 
-Build toolchain (Layer 1/2 C code): `gcc` with `-Wall -Wextra -O2 -std=c11
--D_GNU_SOURCE`; any gcc ≥ 11 satisfying zero-warning builds is acceptable.
+Build toolchain (Layer 1/2 C code): `gcc` with `-Wall -Wextra -O2 -std=c11 -D_GNU_SOURCE`; any gcc ≥ 11 satisfying zero-warning builds is acceptable.
 QEMU: any `qemu-system-x86_64` ≥ 8.0 with user-mode networking (`-netdev user`).

@@ -19,9 +19,10 @@ COLLECT_DIR = layer2-collection/aether-collect
 PROBE_OBJS = $(PROBE_DIR)/seb.o $(PROBE_DIR)/probe.o
 COLLECT_OBJS = $(COLLECT_DIR)/collect.o $(PROBE_DIR)/seb.o
 TEST_OBJS = $(PROBE_DIR)/tests/test_seb.o $(PROBE_DIR)/seb.o
+TEST_PROBE_OBJS = $(PROBE_DIR)/tests/test_probe.o $(PROBE_DIR)/probe.o $(PROBE_DIR)/seb.o
 
 # Targets
-all: libaether.so aether-collect test-seb
+all: libaether.so aether-collect test-seb test-probe
 
 libaether.so: $(PROBE_OBJS)
 	$(CC) -shared -fPIC -o $@ $^ $(LDFLAGS)
@@ -32,12 +33,15 @@ aether-collect: $(COLLECT_OBJS)
 test-seb: $(TEST_OBJS)
 	$(CC) -o $@ $^ $(LDFLAGS)
 
+test-probe: $(TEST_PROBE_OBJS)
+	$(CC) -o $@ $^ $(LDFLAGS)
+
 %.o: %.c
 	$(CC) $(CFLAGS) -fPIC -c -o $@ $<
 
 clean:
-	rm -f $(PROBE_OBJS) $(COLLECT_OBJS) $(TEST_OBJS)
-	rm -f libaether.so aether-collect test-seb
+	rm -f $(PROBE_OBJS) $(COLLECT_OBJS) $(TEST_OBJS) $(TEST_PROBE_OBJS)
+	rm -f libaether.so aether-collect test-seb test-probe
 
 install: all
 	install -d $(BINDIR) $(LIBDIR) $(INCDIR)
@@ -46,7 +50,8 @@ install: all
 	install -m 644 $(PROBE_DIR)/seb.h $(INCDIR)/
 	install -m 644 $(PROBE_DIR)/probe.h $(INCDIR)/
 
-test: test-seb
+test: test-seb test-probe
 	./test-seb
+	./test-probe
 
 .PHONY: all clean install test

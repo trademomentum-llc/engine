@@ -1,0 +1,21 @@
+# ============================================================================
+# AetherOS Telemetry Plane — Layer 7: Grafana provisioned dashboards
+# Loads the committed dashboard JSON from the sibling dashboards/ directory
+# (installed alongside this file under /opt/grafana/conf/provisioning —
+# see BRINGUP.md §1). allowUiUpdates: false keeps Grafana state
+# deterministic: the committed JSON is the only source of truth.
+# Pinned: grafana v11.5.1 (see VERSIONS.md)
+# ============================================================================
+apiVersion: 1
+
+providers:
+  - name: aether-telemetry-plane
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    allowUiUpdates: false   # determinism: no click-ops drift from committed JSON
+    updateIntervalSeconds: 10
+    options:
+      path: /opt/grafana/conf/provisioning/dashboards
+      foldersFromFilesStructure: false
