@@ -4,6 +4,8 @@
 #include <cctype>
 #include <climits>
 #include <cstdio>
+#include <stdlib.h>  // realpath
+#include <time.h>    // localtime_r
 
 namespace nnos {
 
