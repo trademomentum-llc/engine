@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 /*
  * deterministic_benchmark.c -- Deterministic Benchmark Validation Recipe
  *
@@ -19,6 +21,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 /* --------------------------------------------------------------------------
  * Benchmark pattern sets
@@ -299,8 +303,13 @@ static void write_ben_report(const char *report_path, lst_artifact_t *art,
                              ben_scan_result_t *scan, int critical,
                              int errors, int warnings, int infos,
                              float score, int pass) {
-    FILE *f = fopen(report_path, "w");
-    if (!f) return;
+    int rfd = open(report_path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0644);
+    if (rfd < 0) return;
+    FILE *f = fdopen(rfd, "w");
+    if (!f) {
+        close(rfd);
+        return;
+    }
 
     for (int i = 0; i < 70; i++) fputc('=', f);
     fprintf(f, "\nDETERMINISTIC BENCHMARK VALIDATION REPORT\n");

@@ -20,6 +20,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <dirent.h>
 #include <time.h>
 
@@ -485,8 +487,14 @@ static void write_line_dft(FILE *f) {
 
 static void write_report(lst_artifact_t *art, drift_ctx_t *ctx,
                           uint32_t initial_issues, const char *outpath) {
-    FILE *f = fopen(outpath, "w");
+    int rfd = open(outpath, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0644);
+    if (rfd < 0) {
+        fprintf(stderr, "drift-detection: cannot write %s\n", outpath);
+        return;
+    }
+    FILE *f = fdopen(rfd, "w");
     if (!f) {
+        close(rfd);
         fprintf(stderr, "drift-detection: cannot write %s\n", outpath);
         return;
     }
