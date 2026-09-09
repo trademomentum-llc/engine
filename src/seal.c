@@ -7,9 +7,16 @@
  *
  * Security contract:
  *   - Every caller-supplied path is canonicalized with realpath() before
- *     any filesystem operation. The seal marker is always
- *     "<canonical file path>.sealed", so it can never escape the sealed
- *     file's own directory (the allowlist prefix is that directory).
+ *     any filesystem operation. realpath() resolves ".." and follows
+ *     symlinks at every level of the directory tree, so the canonical
+ *     result can legitimately land outside the directory the caller
+ *     composed — no confinement to any base directory is claimed or
+ *     enforced here. What is guaranteed: (1) the canonical form is the
+ *     single path spelling used for all operations below, and (2) file
+ *     and marker opens use O_NOFOLLOW, rejecting a symlink at the final
+ *     resolved component. The seal marker is composed as
+ *     "<canonical path>.sealed" and lands beside the resolved file,
+ *     wherever that resolution points.
  *   - Permission changes are performed with fchmod() on an O_NOFOLLOW
  *     file descriptor, never via a stat-then-chmod-by-name pair.
  *   - chattr is run via fork/execvp with an argv array — no shell.
@@ -48,7 +55,10 @@ static int seal_marker_path(char *dst, size_t maxlen, const char *file_path) {
 }
 
 /* Canonicalize path with realpath() (path must exist). Returns -1 on failure
- * or if the result would not fit — no silent truncation. */
+ * or if the result would not fit — no silent truncation.
+ * Note: realpath() follows symlinks in every directory component, so the
+ * result may resolve outside the directory the caller composed. That is
+ * accepted here — canonicalization, not confinement. */
 static int seal_canonicalize(const char *path, char *dst, size_t maxlen) {
     char *rp = realpath(path, NULL);
     if (!rp) return -1;
@@ -117,9 +127,12 @@ static void seal_chattr_immutable(const char *path) {
 int lst_seal(const char *file_path) {
     if (!file_path) return -1;
 
-    /* Canonicalize: resolves ".."/symlink components. Every path below is
-     * derived from this canonical form, so the marker stays in the sealed
-     * file's own directory. */
+    /* Canonicalize: realpath() resolves ".." and follows symlinks in the
+     * directory tree — the result may resolve outside the directory the
+     * caller composed (same behavior as before; no confinement claimed).
+     * Every path below derives from this canonical form, and the marker
+     * open uses O_NOFOLLOW to reject a symlink at the final resolved
+     * component. */
     char canon[LST_MAX_PATH];
     if (seal_canonicalize(file_path, canon, sizeof(canon)) != 0) {
         fprintf(stderr, "seal: file not found: %s\n", file_path);
