@@ -69,7 +69,7 @@ static FILE *seal_marker_open(const char *marker, const char *mode) {
         flags |= O_WRONLY | O_CREAT | O_TRUNC;
     else
         flags |= O_RDONLY;
-    int fd = open(marker, flags, 0666);
+    int fd = open(marker, flags, 0644);
     if (fd < 0) return NULL;
     FILE *f = fdopen(fd, mode);
     if (!f) {

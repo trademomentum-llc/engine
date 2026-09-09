@@ -174,7 +174,7 @@ static license_t license_classify(const char *s) {
     /* Uppercase comparison buffer */
     char upper[LST_MAX_LICENSE];
     size_t i;
-    for (i = 0; s[i] && i < sizeof(upper) - 1; i++)
+    for (i = 0; i < sizeof(upper) - 1 && s[i]; i++)
         upper[i] = (char)toupper((unsigned char)s[i]);
     upper[i] = '\0';
 

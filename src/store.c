@@ -16,6 +16,8 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 /* Artifact file extension */
 #define LST_EXT ".lst"
@@ -70,8 +72,14 @@ int lst_store_write(const lst_artifact_t *art, const char *store_dir) {
         return -1;
     }
 
-    FILE *f = fopen(path, "wb");
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0644);
+    if (fd < 0) {
+        fprintf(stderr, "store: cannot write %s\n", path);
+        return -1;
+    }
+    FILE *f = fdopen(fd, "wb");
     if (!f) {
+        close(fd);
         fprintf(stderr, "store: cannot write %s\n", path);
         return -1;
     }
