@@ -19,7 +19,8 @@
  *     wherever that resolution points.
  *   - Permission changes are performed with fchmod() on an O_NOFOLLOW
  *     file descriptor, never via a stat-then-chmod-by-name pair.
- *   - chattr is run via fork/execvp with an argv array — no shell.
+ *   - chattr is run via fork/execv with a fixed absolute path and an
+ *     argv array — no PATH search, no shell.
  */
 
 #define _XOPEN_SOURCE 700
@@ -101,9 +102,10 @@ static void seal_fchmod_best_effort(const char *path, mode_t mode) {
 }
 
 #ifdef __linux__
-/* Best-effort chattr +i without a shell: fork + execvp with an argv array,
- * child stderr redirected to /dev/null, all failures ignored. Preserves the
- * historical "chattr +i '<path>' 2>/dev/null" intent exactly. */
+/* Best-effort chattr +i without a shell: fork + execv with a fixed absolute
+ * path (no PATH search) and an argv array; child stderr redirected to
+ * /dev/null, all failures ignored. Preserves the historical
+ * "chattr +i '<path>' 2>/dev/null" intent exactly. */
 static void seal_chattr_immutable(const char *path) {
     pid_t pid = fork();
     if (pid == 0) {
