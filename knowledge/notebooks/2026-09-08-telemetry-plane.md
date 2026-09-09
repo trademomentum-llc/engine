@@ -1,8 +1,8 @@
 ---
 title: "Telemetry Plane — 2026-09-08"
 date: 2026-09-08
-generated_at: "2026-09-08T06:50:00Z"
-event_count: 10
+generated_at: "2026-09-08T07:20:00Z"
+event_count: 11
 source: "session:2026-09-07-aetheros-telemetry"
 ---
 
@@ -10,9 +10,9 @@ source: "session:2026-09-07-aetheros-telemetry"
 
 ## Summary
 
-This notebook records 10 action event(s) for 2026-09-08, spanning 2026-09-08T00:20:00Z to 2026-09-08T06:50:00Z UTC.
+This notebook records 11 action event(s) for 2026-09-08, spanning 2026-09-08T00:20:00Z to 2026-09-08T07:20:00Z UTC.
 
-- Actions: deprecated: 1, modified: 4, verified: 5
+- Actions: deprecated: 1, modified: 5, verified: 5
 - Layers: telemetry
 - Actors: kimi-orchestrator, subagent:configs-engineer, subagent:recon, subagent:security-engineer, subagent:src-engineer + subagent:recipes-engineer
 
@@ -30,6 +30,7 @@ This notebook records 10 action event(s) for 2026-09-08, spanning 2026-09-08T00:
 | 05:30:00 | subagent:recon | telemetry | verified | engine main CodeQL panel wave 2 | Triaged wave-2 alerts and reconciled against the open remediation branch |
 | 06:20:00 | subagent:src-engineer + subagent:recipes-engineer | telemetry | modified | engine branch security/codeql-remediation wave 2 | Fixed permission, logger-path, and offset-check alerts in 19 files |
 | 06:50:00 | kimi-orchestrator | telemetry | verified | engine PR #5 wave 2 | Verified and pushed wave 2; updated PR #5 with the full mapping |
+| 07:20:00 | kimi-orchestrator | telemetry | modified | engine PR #5 wave 3 | Closed the offset-before-range-check cluster (9 alerts) in two token loops |
 
 ## Actions
 
@@ -382,13 +383,52 @@ _No artifact hashes recorded._
 3. push 19 files; blob-SHA verify
 4. comment PR with verdicts and fixes
 
+### AETH-2026-09-07-0026 — Closed the offset-before-range-check cluster (9 alerts) in two token loops
+
+- **Actor:** kimi-orchestrator
+- **Layer:** telemetry
+- **Action:** modified
+- **Target:** engine PR #5 wave 3
+- **Recorded at:** 2026-09-08T07:20:00Z
+- **Valid from:** 2026-09-08T07:20:00Z
+
+**Rationale**
+
+All nine alerts shared one idiom across two sites: jasterish_validation.c:228 and bootstrap_registry.c:280-282 dereferenced the source array before evaluating the bound. Both loops reordered to check the bound first (clen/ti < 127), same construct family as the earlier license_classify fix. Hygiene-class finding (no live overrun on NUL-terminated input), fixed not waived. Verification: make exit 0 with 52 pre-existing warnings only, per-file syntax gates clean, binary runs, both files pushed in commit efb3923a and blob-SHA-verified byte-identical.
+
+**Inputs**
+
+- principal-pasted wave-3 alert list (panel 4-12)
+
+**Outputs**
+
+- recipes/jasterish_validation.c
+- recipes/bootstrap_registry.c
+- engine PR #5 comment
+
+**Hashes**
+
+| Path | SHA-256 |
+| --- | --- |
+| recipes/bootstrap_registry.c | `sha256:f5d7c39678ab5e3d88cc68a83802416d2678115c5a077a3c6ac1ba03ab50d0e4` |
+| recipes/jasterish_validation.c | `sha256:e9ce2cfe44210d2dafa442dd38450252b28b2077f3b7524129a1ac7f5b71e480` |
+
+**Replication Steps**
+
+1. fetch both files from main; identify the exact flagged loops
+2. reorder conditions bound-first in branch copies
+3. make + per-file syntax gates + binary smoke
+4. push_files; fetch-back blob-SHA verify; PR comment
+
 ## Artifacts & Hashes
 
 | Path | SHA-256 |
 | --- | --- |
 | docs/architecture/TELEMETRY_PLANE.md | `sha256:d98007ff0a8b3124a47fa7da4db3b47cc9c779434cedc158e97931657b089f2c` |
 | nnos/src/common/logger.cpp | `sha256:c8e054014ab3deb595f3129acb31eefdab04d70aa30ee89537888052a8b8822e` |
+| recipes/bootstrap_registry.c | `sha256:f5d7c39678ab5e3d88cc68a83802416d2678115c5a077a3c6ac1ba03ab50d0e4` |
 | recipes/deterministic_benchmark.c | `sha256:862a842d0e5b0ff3107ba826b1154898dd6d43bd55d1fdd08ac8e3c0ac38e036` |
+| recipes/jasterish_validation.c | `sha256:e9ce2cfe44210d2dafa442dd38450252b28b2077f3b7524129a1ac7f5b71e480` |
 | research/codeql_triage.md | `sha256:8dd178b449c041f5a8935fbf9fce37e2fcb1faf28148cdde5df9ae171da46114` |
 | research/codeql_wave2_triage.md | `sha256:7269102543cd3d283aa76dcc8996b4ae2b7c0dc38a1ca08211d70667262040f5` |
 | src/lst.c | `sha256:b8eeb6ee76e660e8ca310d51fb475bb224f8156fe0578bd40e64fbde8db90d39` |
@@ -408,7 +448,7 @@ _No open items._
 
 ## Provenance
 
-- Input SHA-256: `fccf3ca8ca9d168b3f6a09c17872df197b016158441cb755014199dc552768da`
-- Events in this notebook: 10
-- Total input events: 25
+- Input SHA-256: `ad095cf6d59ad96b9c3d9ef422ff215576c0be6d2a2c675421d612225aa117dd`
+- Events in this notebook: 11
+- Total input events: 26
 - Compiler: `temporal_kg.notebook` (stdlib-only, deterministic; no wall-clock reads)
