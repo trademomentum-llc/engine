@@ -25,6 +25,8 @@
 #include <string.h>
 #include <ctype.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <dirent.h>
 
 /* --------------------------------------------------------------------------
@@ -877,8 +879,14 @@ static int recipe_tmg_compliance(lst_artifact_t *art, const char *output_dir) {
 
     if (output_dir) mkdir(output_dir, 0755);
 
-    FILE *f = fopen(outpath, "w");
+    int rfd = open(outpath, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0644);
+    if (rfd < 0) {
+        fprintf(stderr, "tmg-compliance: cannot write %s\n", outpath);
+        return -1;
+    }
+    FILE *f = fdopen(rfd, "w");
     if (!f) {
+        close(rfd);
         fprintf(stderr, "tmg-compliance: cannot write %s\n", outpath);
         return -1;
     }
