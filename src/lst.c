@@ -38,7 +38,7 @@ static void scopy(char *dst, const char *src, size_t maxlen) {
 static void strim(char *s) {
     char *start = s;
     while (*start && isspace((unsigned char)*start)) start++;
-    if (start != s) memmove(s, start, strlen(start) + 1);
+    if (start != s) memmove(s, start, strlen(s) + 1);
     size_t len = strlen(s);
     while (len > 0 && isspace((unsigned char)s[len - 1])) s[--len] = '\0';
 }
@@ -47,13 +47,16 @@ static void strim(char *s) {
  *
  * Canonicalization contract: `path` may chain from a caller-supplied project
  * path and readdir() entry names, i.e. a potentially hostile directory tree.
- * The path is resolved with realpath() before the open, deterministically
- * eliminating ".." components and symlinked directory components from the
- * expression; the canonical path is then opened with O_NOFOLLOW so no
- * symlink can be swapped in at the resolved location between
- * canonicalization and open. (Legitimate symlinks inside a scanned tree,
- * e.g. pnpm's node_modules links, still resolve to their real target —
- * same read behavior as before.) */
+ * realpath() resolves ".." and follows symlinks at every level of the tree,
+ * so the canonical target can resolve outside the scanned project tree —
+ * legitimate symlinks (e.g. pnpm's node_modules links) are followed to
+ * their real target, same read behavior as before; no confinement to the
+ * project directory is claimed or enforced. The canonical path is then
+ * opened with O_NOFOLLOW, which rejects a symlink at the final resolved
+ * component, so the bytes come from the resolved regular file itself rather
+ * than a final-component link swapped in after canonicalization.
+ * Intermediate directory components are not re-verified after realpath() —
+ * a residual TOCTOU window on those components is accepted. */
 static char *read_file(const char *path, size_t *out_len) {
     char *canon = realpath(path, NULL);
     if (!canon) return NULL;
@@ -140,12 +143,9 @@ static int json_get_license(const char *json, char *dst, size_t maxlen) {
         p++;
         size_t i = 0;
         while (*p && *p != '"' && i < maxlen - 1) dst[i++] = *p++;
-        dst[i] = '\0';
-        return 1;
     }
     if (*p == '[') {
         /* Array — join with " OR " */
-        p++;
         size_t off = 0;
         int first = 1;
         while (*p && *p != ']') {
@@ -249,7 +249,7 @@ static int json_get_author_npm(const char *json, lst_dep_t *dep) {
         }
     }
 
-    /* Also check "author": { "name": "..." } */
+    /* Also check "author": { "name": ... } */
     if (dep->author_count == 0) {
         const char *p = strstr(json, "\"author\"");
         if (p) {
@@ -271,8 +271,9 @@ static int json_get_author_npm(const char *json, lst_dep_t *dep) {
 /* Find and extract copyright line from LICENSE file in a directory.
  * `dir` chains from the caller-supplied project path plus readdir() names;
  * the fixed filenames from names[] are appended to it. All reads go through
- * read_file(), which canonicalizes with realpath() and then opens with
- * O_NOFOLLOW to reject a symlink at the final resolved path. */
+ * read_file(), which canonicalizes with realpath() — following symlinks
+ * wherever they point, including outside the project tree — and then opens
+ * with O_NOFOLLOW to reject a symlink at the final resolved path. */
 static void find_copyright(const char *dir, char *dst, size_t maxlen) {
     dst[0] = '\0';
     const char *names[] = {
