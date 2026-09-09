@@ -113,7 +113,7 @@ static void seal_chattr_immutable(const char *path) {
             close(devnull);
         }
         char *const args[] = { "chattr", "+i", (char *)path, NULL };
-        execvp("chattr", args);
+        execv("/usr/bin/chattr", args);
         _exit(127);
     }
     if (pid > 0) {
