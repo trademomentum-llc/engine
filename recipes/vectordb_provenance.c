@@ -22,6 +22,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <fcntl.h>
+#include <limits.h>
 
 /* --------------------------------------------------------------------------
  * Qdrant REST API interaction (via external curl call)
@@ -35,30 +39,85 @@
 #define COLLECTION "provenance_corpus"
 #define MAX_QUERY_LEN 512
 
+static int run_curl(char *const argv[], char *output, size_t output_size) {
+    int pipefd[2];
+    if (pipe(pipefd) != 0) return -1;
+    pid_t pid = fork();
+    if (pid < 0) { close(pipefd[0]); close(pipefd[1]); return -1; }
+    if (pid == 0) {
+        int devnull = open("/dev/null", O_WRONLY);
+        dup2(pipefd[1], STDOUT_FILENO);
+        if (devnull >= 0) dup2(devnull, STDERR_FILENO);
+        close(pipefd[0]); close(pipefd[1]);
+        if (devnull >= 0) close(devnull);
+        execv("/usr/bin/curl", argv);
+        _exit(127);
+    }
+    close(pipefd[1]);
+    size_t total = 0;
+    char discard[4096];
+    for (;;) {
+        char *target = total + 1 < output_size ? output + total : discard;
+        size_t capacity = total + 1 < output_size ? output_size - total - 1
+                                                   : sizeof(discard);
+        ssize_t n = read(pipefd[0], target, capacity);
+        if (n <= 0) break;
+        if (target == output + total) total += (size_t)n;
+    }
+    output[total] = '\0';
+    close(pipefd[0]);
+    int status;
+    if (waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) ||
+        WEXITSTATUS(status) != 0) return -1;
+    return 0;
+}
+
+static void json_escape(char *dst, size_t size, const char *src) {
+    size_t used = 0;
+    for (; *src; src++) {
+        unsigned char c = (unsigned char)*src;
+        if (c == '"' || c == '\\') {
+            if (used + 2 >= size) break;
+            dst[used++] = '\\';
+            dst[used++] = (char)c;
+        } else if (c == '\b' || c == '\f' || c == '\n' ||
+                   c == '\r' || c == '\t') {
+            if (used + 2 >= size) break;
+            dst[used++] = '\\';
+            dst[used++] = (c == '\b') ? 'b' :
+                          (c == '\f') ? 'f' :
+                          (c == '\n') ? 'n' :
+                          (c == '\r') ? 'r' : 't';
+        } else if (c < 0x20) {
+            if (used + 6 >= size) break;
+            snprintf(dst + used, size - used, "\\u%04x", c);
+            used += 6;
+        } else {
+            if (used + 1 >= size) break;
+            dst[used++] = (char)c;
+        }
+    }
+    dst[used] = '\0';
+}
+
 static int qdrant_scroll_count(const char *filter_field, const char *filter_value) {
     /*
      * Query Qdrant for points matching a payload filter.
      * Returns the count of matching points, or -1 on error.
      */
-    char cmd[2048];
-    snprintf(cmd, sizeof(cmd),
-        "curl -s -X POST '%s/collections/%s/points/scroll' "
-        "-H 'Content-Type: application/json' "
-        "-d '{\"filter\":{\"must\":[{\"key\":\"%s\","
-        "\"match\":{\"text\":\"%s\"}}]},\"limit\":1,"
-        "\"with_payload\":false}' 2>/dev/null",
-        QDRANT_URL, COLLECTION, filter_field, filter_value);
-
-    FILE *fp = popen(cmd, "r");
-    if (!fp) return -1;
-
+    char escaped_field[MAX_QUERY_LEN * 2], escaped_value[MAX_QUERY_LEN * 2];
+    char data[MAX_QUERY_LEN * 4];
+    json_escape(escaped_field, sizeof(escaped_field), filter_field);
+    json_escape(escaped_value, sizeof(escaped_value), filter_value);
+    snprintf(data, sizeof(data),
+        "{\"filter\":{\"must\":[{\"key\":\"%s\",\"match\":{\"text\":\"%s\"}}]},"
+        "\"limit\":1,\"with_payload\":false}", escaped_field, escaped_value);
     char buf[4096];
-    size_t total = 0;
-    while (fgets(buf + total, (int)(sizeof(buf) - total), fp)) {
-        total += strlen(buf + total);
-    }
-    int status = pclose(fp);
-    if (status != 0) return -1;
+    char url[256];
+    snprintf(url, sizeof(url), "%s/collections/%s/points/scroll", QDRANT_URL, COLLECTION);
+    char *argv[] = {"curl", "-s", "-X", "POST", url, "-H",
+                    "Content-Type: application/json", "-d", data, NULL};
+    if (run_curl(argv, buf, sizeof(buf)) != 0) return -1;
 
     /* Parse minimal JSON to find "points":[ ... ] array length */
     char *points = strstr(buf, "\"points\":[");
@@ -73,25 +132,19 @@ static int qdrant_scroll_count(const char *filter_field, const char *filter_valu
 }
 
 static int qdrant_count_collection(void) {
-    char cmd[1024];
-    snprintf(cmd, sizeof(cmd),
-        "curl -s '%s/collections/%s' 2>/dev/null",
-        QDRANT_URL, COLLECTION);
-
-    FILE *fp = popen(cmd, "r");
-    if (!fp) return -1;
-
     char buf[4096];
-    size_t total = 0;
-    while (fgets(buf + total, (int)(sizeof(buf) - total), fp)) {
-        total += strlen(buf + total);
-    }
-    pclose(fp);
+    char url[256];
+    snprintf(url, sizeof(url), "%s/collections/%s", QDRANT_URL, COLLECTION);
+    char *argv[] = {"curl", "-s", url, NULL};
+    if (run_curl(argv, buf, sizeof(buf)) != 0) return -1;
 
     /* Find points_count in response */
     char *pc = strstr(buf, "\"points_count\":");
     if (!pc) return -1;
-    return atoi(pc + 15);
+    char *end;
+    long count = strtol(pc + 15, &end, 10);
+    if (end == pc + 15 || count < 0 || count > INT_MAX) return -1;
+    return (int)count;
 }
 
 /* --------------------------------------------------------------------------

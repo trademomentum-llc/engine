@@ -19,9 +19,15 @@
 #ifndef ENGINE_LST_H
 #define ENGINE_LST_H
 
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include <stdint.h>
 #include <stddef.h>
 #include <time.h>
+#include <stdio.h>
+#include <strings.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -44,6 +50,8 @@ extern "C" {
 #define LST_MAX_AGENTS       64
 #define LST_MAX_TRACES     2048
 #define LST_MAX_GUARDRAILS  128
+
+FILE *lst_secure_fopen(const char *path, const char *mode);
 
 /* --------------------------------------------------------------------------
  * Enumerations — all stored as uint8_t, no string comparisons at runtime
