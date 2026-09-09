@@ -68,7 +68,7 @@ int lst_store_write(const lst_artifact_t *art, const char *store_dir) {
         return -1;
     }
     if (prc != 0) {
-        fprintf(stderr, "store: cannot write %s/%s%s\n", store_dir, art->project_name, LST_EXT);
+        fprintf(stderr, "store: cannot build store path for project: %s\n", art->project_name);
         return -1;
     }
 
