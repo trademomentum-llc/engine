@@ -24,8 +24,8 @@
 
 /* Build the store path for a given project name.
  * Returns 0 on success, -1 if project_name is unsafe, -2 if store_dir
- * cannot be canonicalized or the result would not fit (no silent
- * truncation). */
+ * cannot be canonicalized, -3 if the composed path would not fit
+ * (no silent truncation). */
 static int store_path(char *dst, size_t maxlen, const char *store_dir, const char *project_name) {
     /* Reject traversal and hostile names outright */
     if (!project_name || !project_name[0]) return -1;
@@ -56,7 +56,7 @@ static int store_path(char *dst, size_t maxlen, const char *store_dir, const cha
     if (!canon_dir) return -2;
     int n = snprintf(dst, maxlen, "%s/%s%s", canon_dir, safe_name, LST_EXT);
     free(canon_dir);
-    if (n < 0 || (size_t)n >= maxlen) return -2;
+    if (n < 0 || (size_t)n >= maxlen) return -3;
     return 0;
 }
 
@@ -72,8 +72,17 @@ int lst_store_write(const lst_artifact_t *art, const char *store_dir) {
         fprintf(stderr, "store: unsafe project name: %s\n", art->project_name);
         return -1;
     }
+    if (prc == -2) {
+        /* Report the failing input, not a composed path — no valid
+         * on-disk path exists to print. */
+        fprintf(stderr, "store: cannot canonicalize store directory: %s\n", store_dir);
+        return -1;
+    }
     if (prc != 0) {
-        fprintf(stderr, "store: cannot build store path for project: %s\n", art->project_name);
+        /* -3: the real (canonical) directory plus sanitized name would
+         * overflow LST_MAX_PATH. Report the store directory as context;
+         * the composed path was never materialized. */
+        fprintf(stderr, "store: composed path too long under store directory: %s\n", store_dir);
         return -1;
     }
 
