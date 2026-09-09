@@ -64,7 +64,7 @@ int lst_store_write(const lst_artifact_t *art, const char *store_dir) {
     if (!art || !store_dir) return -1;
 
     /* Ensure store directory exists */
-    mkdir(store_dir, 0755);
+    mkdir(store_dir, 0700);
 
     char path[LST_MAX_PATH];
     int prc = store_path(path, sizeof(path), store_dir, art->project_name);
