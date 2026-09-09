@@ -25,6 +25,36 @@
  * Internal helpers
  * -------------------------------------------------------------------------- */
 
+FILE *lst_secure_fopen(const char *path, const char *mode) {
+    if (!path || !mode) return NULL;
+    const char *component = path;
+    while ((component = strstr(component, "..")) != NULL) {
+        if ((component == path || component[-1] == '/') &&
+            (component[2] == '\0' || component[2] == '/'))
+            return NULL;
+        component += 2;
+    }
+    int flags;
+    if (mode[0] == 'r') flags = O_RDONLY;
+    else if (mode[0] == 'a') flags = O_WRONLY | O_CREAT | O_APPEND;
+    else if (mode[0] == 'w') flags = O_WRONLY | O_CREAT | O_TRUNC;
+    else return NULL;
+
+    int fd = open(path, flags | O_CLOEXEC | O_NOFOLLOW,
+                  S_IRUSR | S_IWUSR);
+    if (fd < 0) return NULL;
+
+    struct stat st;
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+        close(fd);
+        return NULL;
+    }
+
+    FILE *f = fdopen(fd, mode);
+    if (!f) close(fd);
+    return f;
+}
+
 /* Safe string copy into fixed buffer */
 static void scopy(char *dst, const char *src, size_t maxlen) {
     if (!src) { dst[0] = '\0'; return; }
