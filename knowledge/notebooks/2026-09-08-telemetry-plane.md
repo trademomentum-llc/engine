@@ -1,8 +1,8 @@
 ---
 title: "Telemetry Plane — 2026-09-08"
 date: 2026-09-08
-generated_at: "2026-09-08T04:30:00Z"
-event_count: 7
+generated_at: "2026-09-08T06:50:00Z"
+event_count: 10
 source: "session:2026-09-07-aetheros-telemetry"
 ---
 
@@ -10,9 +10,9 @@ source: "session:2026-09-07-aetheros-telemetry"
 
 ## Summary
 
-This notebook records 7 action event(s) for 2026-09-08, spanning 2026-09-08T00:20:00Z to 2026-09-08T04:30:00Z UTC.
+This notebook records 10 action event(s) for 2026-09-08, spanning 2026-09-08T00:20:00Z to 2026-09-08T06:50:00Z UTC.
 
-- Actions: deprecated: 1, modified: 3, verified: 3
+- Actions: deprecated: 1, modified: 4, verified: 5
 - Layers: telemetry
 - Actors: kimi-orchestrator, subagent:configs-engineer, subagent:recon, subagent:security-engineer, subagent:src-engineer + subagent:recipes-engineer
 
@@ -27,6 +27,9 @@ This notebook records 7 action event(s) for 2026-09-08, spanning 2026-09-08T00:2
 | 02:00:00 | subagent:recon | telemetry | verified | engine main CodeQL panel | Triaged 24 CodeQL alerts on main across legacy src, recipes, and one daemon |
 | 03:10:00 | subagent:src-engineer + subagent:recipes-engineer | telemetry | modified | engine src/ + recipes/ + nnos daemon | Remediated all 24 alerts across 19 files on branch security/codeql-remediation |
 | 04:30:00 | kimi-orchestrator | telemetry | verified | engine PR #5 | Pushed all 19 files byte-verified and opened PR #5 to main |
+| 05:30:00 | subagent:recon | telemetry | verified | engine main CodeQL panel wave 2 | Triaged wave-2 alerts and reconciled against the open remediation branch |
+| 06:20:00 | subagent:src-engineer + subagent:recipes-engineer | telemetry | modified | engine branch security/codeql-remediation wave 2 | Fixed permission, logger-path, and offset-check alerts in 19 files |
+| 06:50:00 | kimi-orchestrator | telemetry | verified | engine PR #5 wave 2 | Verified and pushed wave 2; updated PR #5 with the full mapping |
 
 ## Actions
 
@@ -278,16 +281,121 @@ _No artifact hashes recorded._
 3. push all 19 files; verify each by blob SHA-1
 4. open PR with remediation mapping
 
+### AETH-2026-09-07-0023 — Triaged wave-2 alerts and reconciled against the open remediation branch
+
+- **Actor:** subagent:recon
+- **Layer:** telemetry
+- **Action:** verified
+- **Target:** engine main CodeQL panel wave 2
+- **Recorded at:** 2026-09-08T05:30:00Z
+- **Valid from:** 2026-09-08T05:30:00Z
+
+**Rationale**
+
+Deterministic triage before fixes: five alerts were already closed by wave-1 constructs (three lst.c path reads via the fixed read_file, seal.c amend create-proof open, seal.c execvp, store.c validation-first). Located the truncated alert 13 at lst.c:156 in license_classify (offset-before-check idiom). Permission findings confirmed as umask-dependent 0666 creation in store.c, the seal marker open, and 15 recipe report writers including deterministic_benchmark.c, which wave 1 had not touched.
+
+**Inputs**
+
+- principal-pasted wave-2 alert list
+
+**Outputs**
+
+- research/codeql_wave2_triage.md
+
+**Hashes**
+
+| Path | SHA-256 |
+| --- | --- |
+| research/codeql_wave2_triage.md | `sha256:7269102543cd3d283aa76dcc8996b4ae2b7c0dc38a1ca08211d70667262040f5` |
+
+**Replication Steps**
+
+1. clone main and security/codeql-remediation
+2. extract verbatim context per alert
+3. map each construct into branch files and assign ALREADY-FIXED or NOT-FIXED verdicts
+
+### AETH-2026-09-07-0024 — Fixed permission, logger-path, and offset-check alerts in 19 files
+
+- **Actor:** subagent:src-engineer + subagent:recipes-engineer
+- **Layer:** telemetry
+- **Action:** modified
+- **Target:** engine branch security/codeql-remediation wave 2
+- **Recorded at:** 2026-09-08T06:20:00Z
+- **Valid from:** 2026-09-08T06:20:00Z
+
+**Rationale**
+
+Uniform creation-mode hardening: all report and artifact creation now uses open with O_WRONLY|O_CREAT|O_TRUNC|O_NOFOLLOW|O_CLOEXEC and explicit 0644 plus fdopen, eliminating umask-dependent world-writable files while capping permissions under any umask. seal marker creation tightened 0666 to 0644 with the post-write 0444 flow intact. logger.cpp canonicalizes NNOS_LOG_DIR with fail-closed fallback and sanitizes the daemon-name component. lst.c license_classify loop now checks the bound before dereferencing. deterministic_benchmark.c received the missing POSIX feature macro line.
+
+**Inputs**
+
+- codeql_wave2_triage.md
+
+**Outputs**
+
+- 19 fixed files staged under remediation/engine/
+
+**Hashes**
+
+| Path | SHA-256 |
+| --- | --- |
+| nnos/src/common/logger.cpp | `sha256:c8e054014ab3deb595f3129acb31eefdab04d70aa30ee89537888052a8b8822e` |
+| recipes/deterministic_benchmark.c | `sha256:862a842d0e5b0ff3107ba826b1154898dd6d43bd55d1fdd08ac8e3c0ac38e036` |
+| src/store.c | `sha256:a907c5bc000f98b00dc398f8e361c7015da126af8e7db96915ffa313f208b17e` |
+
+**Replication Steps**
+
+1. clone security branch; apply uniform open+fdopen pattern at every create site
+2. canonicalize and confine logger path
+3. reorder license_classify condition
+4. make with zero new warnings; run umask-variance permission harness
+
+### AETH-2026-09-07-0025 — Verified and pushed wave 2; updated PR #5 with the full mapping
+
+- **Actor:** kimi-orchestrator
+- **Layer:** telemetry
+- **Action:** verified
+- **Target:** engine PR #5 wave 2
+- **Recorded at:** 2026-09-08T06:50:00Z
+- **Valid from:** 2026-09-08T06:50:00Z
+
+**Rationale**
+
+Main-agent gates: combined tree over wave-1 plus wave-2 builds clean (exit 0, 52 pre-existing warnings only); independent permission harness confirms 0644 under umask 0000 and 0600 under umask 0077 (never more permissive than 0644); all 19 pushed files blob-SHA-verified byte-identical (commits a3f6b2ad through 0e30af22).
+
+**Inputs**
+
+- remediated wave-2 tree
+
+**Outputs**
+
+- engine PR #5 comment: wave-2 remediation mapping
+
+**Hashes**
+
+_No artifact hashes recorded._
+
+**Replication Steps**
+
+1. clone branch; overlay all files; make
+2. compile and run umask-variance harness
+3. push 19 files; blob-SHA verify
+4. comment PR with verdicts and fixes
+
 ## Artifacts & Hashes
 
 | Path | SHA-256 |
 | --- | --- |
 | docs/architecture/TELEMETRY_PLANE.md | `sha256:d98007ff0a8b3124a47fa7da4db3b47cc9c779434cedc158e97931657b089f2c` |
+| nnos/src/common/logger.cpp | `sha256:c8e054014ab3deb595f3129acb31eefdab04d70aa30ee89537888052a8b8822e` |
+| recipes/deterministic_benchmark.c | `sha256:862a842d0e5b0ff3107ba826b1154898dd6d43bd55d1fdd08ac8e3c0ac38e036` |
 | research/codeql_triage.md | `sha256:8dd178b449c041f5a8935fbf9fce37e2fcb1faf28148cdde5df9ae171da46114` |
+| research/codeql_wave2_triage.md | `sha256:7269102543cd3d283aa76dcc8996b4ae2b7c0dc38a1ca08211d70667262040f5` |
 | src/lst.c | `sha256:b8eeb6ee76e660e8ca310d51fb475bb224f8156fe0578bd40e64fbde8db90d39` |
 | src/main.c | `sha256:ca9f5a25331b36ed8f6305b091565bace2e64a34a7222ca46841c27655dcdf3c` |
 | src/seal.c | `sha256:52f3b5de3e6272dbacf8789ceda45961d30e6240e37518ff1d823a9020ad0582` |
 | src/store.c | `sha256:865f703d5b363b6cdb78c15e13bb68de40be5d1a2b0e458c5fab53001c3497ae` |
+| src/store.c | `sha256:a907c5bc000f98b00dc398f8e361c7015da126af8e7db96915ffa313f208b17e` |
 | telemetry/HASHES.sha256 | `sha256:db90a8476d9c8f2e9ddbf5b5019111cbf7c9b8413c24c6e49853566beac9a27e` |
 | telemetry/layer1-instrumentation/aether-probe/probe.c | `sha256:a44eea80fa068b0876b2fbef7a91dae472b0ea892f24f70e1623716821c46734` |
 | telemetry/layer1-instrumentation/aether-probe/seb.c | `sha256:9596f50516c7df44447888a1e2dc93fb9f3c38cc4f25efb720d468a17981168c` |
@@ -300,7 +408,7 @@ _No open items._
 
 ## Provenance
 
-- Input SHA-256: `5a9dd58ea406e2f31b3e073986684def1b65b64ccd0db9074a901f353fe6a815`
-- Events in this notebook: 7
-- Total input events: 22
+- Input SHA-256: `fccf3ca8ca9d168b3f6a09c17872df197b016158441cb755014199dc552768da`
+- Events in this notebook: 10
+- Total input events: 25
 - Compiler: `temporal_kg.notebook` (stdlib-only, deterministic; no wall-clock reads)
