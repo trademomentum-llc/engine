@@ -100,6 +100,22 @@ static void seal_fchmod_best_effort(const char *path, mode_t mode) {
     close(fd);
 }
 
+/* Open a data file for seal/verify inspection. O_RDONLY|O_NONBLOCK so a
+ * FIFO with no writer succeeds immediately instead of blocking forever
+ * (the caller's fstat then rejects it as non-regular). On EACCES — e.g.
+ * an owner-write-only (0200) regular file that the historical
+ * stat+chmod flow could seal — retry O_WRONLY; the descriptor is only
+ * used for fstat/fchmod, never read. O_NONBLOCK on the retry makes a
+ * write-only FIFO fail promptly (ENXIO) rather than block awaiting a
+ * reader. O_NOFOLLOW rejects a symlink at the final resolved component.
+ * Caller must fstat() and reject anything that is not a regular file. */
+static int seal_open_data_fd(const char *path) {
+    int fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0 && errno == EACCES)
+        fd = open(path, O_WRONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+    return fd;
+}
+
 #ifdef __linux__
 /* Best-effort chattr +i without a shell: fork + execvp with an argv array,
  * child stderr redirected to /dev/null, all failures ignored. Preserves the
@@ -140,8 +156,9 @@ int lst_seal(const char *file_path) {
     }
 
     /* Open once by descriptor: fstat/fchmod act on the same file, closing
-     * the stat-then-chmod race window. */
-    int fd = open(canon, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+     * the stat-then-chmod race window. O_NONBLOCK keeps FIFOs from
+     * blocking; the EACCES retry covers owner-write-only regular files. */
+    int fd = seal_open_data_fd(canon);
     if (fd < 0) {
         fprintf(stderr, "seal: file not found: %s\n", file_path);
         return -1;
@@ -182,12 +199,15 @@ int lst_seal(const char *file_path) {
     fprintf(f, "Size: %lld\n", (long long)st.st_size);
     fprintf(f, "Mtime: %ld\n", (long)st.st_mtime);
     fprintf(f, "Status: IMMUTABLE\n");
+    /* Make the marker read-only (444) through the descriptor we already
+     * hold — no path re-lookup, and it works even under a
+     * read-restricting umask that would deny re-opening the marker. */
+    fchmod(fileno(f), S_IRUSR | S_IRGRP | S_IROTH);
     fclose(f);
 
     /* Set read-only: 444 (fd-based; no path re-lookup) */
     fchmod(fd, S_IRUSR | S_IRGRP | S_IROTH);
     close(fd);
-    seal_fchmod_best_effort(marker, S_IRUSR | S_IRGRP | S_IROTH);
 
     /* On Linux, try chattr +i */
 #ifdef __linux__
@@ -209,10 +229,21 @@ int lst_seal_verify(const char *file_path) {
         return -1;
 
     FILE *f = seal_marker_open(marker, "r");
+    if (!f) {
+        /* Legacy fallback: files sealed through a final-component symlink
+         * have their marker at "<original spelling>.sealed", beside the
+         * symlink, not at the canonical path's marker. Try the as-passed
+         * spelling (same O_NOFOLLOW open) before concluding the file is
+         * not sealed. */
+        char legacy[LST_MAX_PATH];
+        if (strcmp(file_path, canon) != 0 &&
+            seal_marker_path(legacy, sizeof(legacy), file_path) == 0)
+            f = seal_marker_open(legacy, "r");
+    }
     if (!f) return -1; /* no seal marker = not sealed */
 
     long stored_size = -1;
-    long stored_mtime __attribute__((unused)) = -1;
+    long stored_mtime = -1;
     char line[512];
 
     while (fgets(line, sizeof(line), f)) {
@@ -223,12 +254,25 @@ int lst_seal_verify(const char *file_path) {
     }
     fclose(f);
 
-    /* Verify current file matches */
+    /* Verify current file matches — fd-based: open the canonical path
+     * with O_NOFOLLOW and fstat that descriptor, so the check acts on
+     * the same inode that was opened (no path re-lookup race). */
+    int fd = seal_open_data_fd(canon);
+    if (fd < 0) return -1;
     struct stat st;
-    if (stat(canon, &st) != 0) return -1;
+    if (fstat(fd, &st) != 0) {
+        close(fd);
+        return -1;
+    }
+    close(fd);
 
     if ((long)st.st_size != stored_size) {
         fprintf(stderr, "seal: INTEGRITY VIOLATION — size mismatch: %s\n", file_path);
+        return -1;
+    }
+
+    if ((long)st.st_mtime != stored_mtime) {
+        fprintf(stderr, "seal: INTEGRITY VIOLATION — mtime mismatch: %s\n", file_path);
         return -1;
     }
 
@@ -250,8 +294,10 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
         return -1;
     }
 
-    /* Temporarily make writable via descriptor (no chmod-by-name) */
-    int fd = open(canon, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    /* Temporarily make writable via descriptor (no chmod-by-name).
+     * seal_open_data_fd keeps FIFOs from blocking and covers
+     * owner-write-only regular files via its EACCES retry. */
+    int fd = seal_open_data_fd(canon);
     if (fd < 0) {
         fprintf(stderr, "seal: cannot open for amendment: %s\n", file_path);
         return -1;

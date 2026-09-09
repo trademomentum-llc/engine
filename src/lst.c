@@ -68,7 +68,7 @@ static void scopy(char *dst, const char *src, size_t maxlen) {
 static void strim(char *s) {
     char *start = s;
     while (*start && isspace((unsigned char)*start)) start++;
-    if (start != s) memmove(s, start, strlen(s) + 1);
+    if (start != s) memmove(s, start, strlen(start) + 1);
     size_t len = strlen(s);
     while (len > 0 && isspace((unsigned char)s[len - 1])) s[--len] = '\0';
 }
@@ -173,6 +173,8 @@ static int json_get_license(const char *json, char *dst, size_t maxlen) {
         p++;
         size_t i = 0;
         while (*p && *p != '"' && i < maxlen - 1) dst[i++] = *p++;
+        dst[i] = '\0';
+        return 1;
     }
     if (*p == '[') {
         /* Array — join with " OR " */
@@ -349,9 +351,14 @@ lst_artifact_t *lst_create(const char *project_path) {
 
     scopy(art->project_path, project_path, LST_MAX_PATH);
 
-    /* Extract project name from path */
-    const char *name = strrchr(project_path, '/');
-    scopy(art->project_name, name ? name + 1 : project_path, LST_MAX_NAME);
+    /* Extract project name from the canonical path's basename, so raw
+     * spellings like "." or "dir/" still yield a usable, store-safe name.
+     * Falls back to the raw spelling if the path cannot be resolved. */
+    char *rp = realpath(project_path, NULL);
+    const char *base = rp ? rp : project_path;
+    const char *name = strrchr(base, '/');
+    scopy(art->project_name, name ? name + 1 : base, LST_MAX_NAME);
+    free(rp);
 
     return art;
 }
