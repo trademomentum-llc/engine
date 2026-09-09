@@ -44,9 +44,14 @@ static int store_path(char *dst, size_t maxlen, const char *store_dir, const cha
     }
     safe_name[i] = '\0';
 
-    /* Canonicalize store_dir and confine the artifact inside it: dst is
-     * exactly <canonical store_dir>/<safe_name>.lst, and safe_name is a
-     * single benign component, so the result cannot escape the store. */
+    /* Canonicalize store_dir: realpath() resolves ".." and follows symlinks
+     * at every level of the directory tree, so canon_dir is the store's real
+     * location — which can be outside the path spelling the caller passed.
+     * dst is composed as <canon_dir>/<safe_name>.lst where safe_name is a
+     * single validated component (no separators, no ".."), so the composed
+     * path resolves inside canon_dir. Confinement holds relative to the
+     * canonical store directory only; open() adds O_NOFOLLOW to reject a
+     * symlink at the final resolved component. */
     char *canon_dir = realpath(store_dir, NULL);
     if (!canon_dir) return -2;
     int n = snprintf(dst, maxlen, "%s/%s%s", canon_dir, safe_name, LST_EXT);
