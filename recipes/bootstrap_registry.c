@@ -281,9 +281,9 @@ static void scan_file_bsr(lst_artifact_t *art, const char *fpath,
                 while (p) {
                     char token[128];
                     int ti = 0;
-                    while (p[ti] && (p[ti] == '_' ||
+                    while (ti < 127 && p[ti] && (p[ti] == '_' ||
                            (p[ti] >= 'a' && p[ti] <= 'z') ||
-                           (p[ti] >= '0' && p[ti] <= '9')) && ti < 127) {
+                           (p[ti] >= '0' && p[ti] <= '9'))) {
                         token[ti] = p[ti];
                         ti++;
                     }

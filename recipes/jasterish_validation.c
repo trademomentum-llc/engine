@@ -229,7 +229,7 @@ static int check_fixpoint_hashes(lst_artifact_t *art, const char *project_path) 
             if (*p != '\0' && *p != '#') {
                 /* Take first 64 hex chars or up to first space */
                 size_t clen = 0;
-                while (p[clen] && p[clen] != ' ' && p[clen] != '\t' && clen < 127)
+                while (clen < 127 && p[clen] && p[clen] != ' ' && p[clen] != '\t')
                     clen++;
                 memcpy(current_hash, p, clen);
                 current_hash[clen] = '\0';
