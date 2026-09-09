@@ -16,9 +16,10 @@ enum class RepairPhase { DETECT, REMOVE, RESTORE, OPTIMIZE, ADAPT, IDLE };
 
 static bool is_4am_local() {
     std::time_t now = std::time(nullptr);
-    std::tm local_buf;
-    std::tm* local = localtime_r(&now, &local_buf);
-    return local && local->tm_hour == 4 && local->tm_min < 5;
+    std::tm tm_buf{};
+    std::tm* local = localtime_r(&now, &tm_buf);
+    if (!local) return false;
+    return local->tm_hour == 4 && local->tm_min < 5;
 }
 
 int main() {

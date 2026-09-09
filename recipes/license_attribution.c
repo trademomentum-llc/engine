@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 /*
  * license_attribution.c — License Attribution Recipe
  *
@@ -11,6 +13,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 /* License type to string */
 static const char *license_name(uint8_t lic) {
@@ -89,8 +93,14 @@ static int recipe_license_attribution(lst_artifact_t *art, const char *output_di
     /* Ensure output directory exists */
     if (output_dir) mkdir(output_dir, 0755);
 
-    FILE *f = lst_secure_fopen(outpath, "w");
+    int rfd = open(outpath, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0644);
+    if (rfd < 0) {
+        fprintf(stderr, "license-attribution: cannot write %s\n", outpath);
+        return -1;
+    }
+    FILE *f = fdopen(rfd, "w");
     if (!f) {
+        close(rfd);
         fprintf(stderr, "license-attribution: cannot write %s\n", outpath);
         return -1;
     }
@@ -108,7 +118,11 @@ static int recipe_license_attribution(lst_artifact_t *art, const char *output_di
     struct tm tm_buf;
     struct tm *t = gmtime_r(&now, &tm_buf);
     char ts[64];
-    strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S UTC", t);
+    if (t) {
+        strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S UTC", t);
+    } else {
+        snprintf(ts, sizeof(ts), "1970-01-01 00:00:00 UTC");
+    }
     fprintf(f, "Generated: %s\n", ts);
     fprintf(f, "Total Dependencies: %u\n", art->dep_count);
     write_sep(f);

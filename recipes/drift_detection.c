@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 /*
  * drift_detection.c -- NNOS Drift Detection Recipe
  *
@@ -18,6 +20,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <dirent.h>
 #include <time.h>
 
@@ -88,7 +92,7 @@ static const char *NNOS_DAEMONS[] = {
  * -------------------------------------------------------------------------- */
 
 static char *read_file_dft(const char *path, size_t *out_len) {
-    FILE *f = lst_secure_fopen(path, "rb");
+    FILE *f = fopen(path, "rb");
     if (!f) return NULL;
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
@@ -483,8 +487,14 @@ static void write_line_dft(FILE *f) {
 
 static void write_report(lst_artifact_t *art, drift_ctx_t *ctx,
                           uint32_t initial_issues, const char *outpath) {
-    FILE *f = lst_secure_fopen(outpath, "w");
+    int rfd = open(outpath, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0644);
+    if (rfd < 0) {
+        fprintf(stderr, "drift-detection: cannot write %s\n", outpath);
+        return;
+    }
+    FILE *f = fdopen(rfd, "w");
     if (!f) {
+        close(rfd);
         fprintf(stderr, "drift-detection: cannot write %s\n", outpath);
         return;
     }
@@ -501,7 +511,11 @@ static void write_report(lst_artifact_t *art, drift_ctx_t *ctx,
     struct tm tm_buf;
     struct tm *t = gmtime_r(&now, &tm_buf);
     char ts[64];
-    strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S UTC", t);
+    if (t) {
+        strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S UTC", t);
+    } else {
+        snprintf(ts, sizeof(ts), "1970-01-01 00:00:00 UTC");
+    }
     fprintf(f, "Generated: %s\n", ts);
     fprintf(f, "Drift Issues Found: %u\n", new_issues);
     write_sep_dft(f);

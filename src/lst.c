@@ -6,16 +6,20 @@
  * populate fixed-layout structs. No interpretation, no GC, no boxing.
  */
 
+#define _XOPEN_SOURCE 700
+#define _POSIX_C_SOURCE 200809L
+
 #include "lst.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <dirent.h>
-#include <sys/stat.h>
 #include <fcntl.h>
-#include <unistd.h>
+#include <sys/stat.h>
 #include <ctype.h>
+#include <unistd.h>
 
 /* --------------------------------------------------------------------------
  * Internal helpers
@@ -64,15 +68,33 @@ static void scopy(char *dst, const char *src, size_t maxlen) {
 static void strim(char *s) {
     char *start = s;
     while (*start && isspace((unsigned char)*start)) start++;
-    if (start != s) memmove(s, start, strlen(start) + 1);
+    if (start != s) memmove(s, start, strlen(s) + 1);
     size_t len = strlen(s);
     while (len > 0 && isspace((unsigned char)s[len - 1])) s[--len] = '\0';
 }
 
-/* Read entire file into malloc'd buffer. Caller frees. Returns NULL on fail. */
+/* Read entire file into malloc'd buffer. Caller frees. Returns NULL on fail.
+ *
+ * Canonicalization contract: `path` may chain from a caller-supplied project
+ * path and readdir() entry names, i.e. a potentially hostile directory tree.
+ * realpath() resolves ".." and follows symlinks at every level of the tree,
+ * so the canonical target can resolve outside the scanned project tree —
+ * legitimate symlinks (e.g. pnpm's node_modules links) are followed to
+ * their real target, same read behavior as before; no confinement to the
+ * project directory is claimed or enforced. The canonical path is then
+ * opened with O_NOFOLLOW, which rejects a symlink at the final resolved
+ * component, so the bytes come from the resolved regular file itself rather
+ * than a final-component link swapped in after canonicalization.
+ * Intermediate directory components are not re-verified after realpath() —
+ * a residual TOCTOU window on those components is accepted. */
 static char *read_file(const char *path, size_t *out_len) {
-    FILE *f = lst_secure_fopen(path, "rb");
-    if (!f) return NULL;
+    char *canon = realpath(path, NULL);
+    if (!canon) return NULL;
+    int fd = open(canon, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    free(canon);
+    if (fd < 0) return NULL;
+    FILE *f = fdopen(fd, "rb");
+    if (!f) { close(fd); return NULL; }
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
     if (sz < 0 || sz > 50 * 1024 * 1024) { fclose(f); return NULL; } /* 50MB cap */
@@ -151,12 +173,9 @@ static int json_get_license(const char *json, char *dst, size_t maxlen) {
         p++;
         size_t i = 0;
         while (*p && *p != '"' && i < maxlen - 1) dst[i++] = *p++;
-        dst[i] = '\0';
-        return 1;
     }
     if (*p == '[') {
         /* Array — join with " OR " */
-        p++;
         size_t off = 0;
         int first = 1;
         while (*p && *p != ']') {
@@ -185,7 +204,7 @@ static license_t license_classify(const char *s) {
     /* Uppercase comparison buffer */
     char upper[LST_MAX_LICENSE];
     size_t i;
-    for (i = 0; s[i] && i < sizeof(upper) - 1; i++)
+    for (i = 0; i < sizeof(upper) - 1 && s[i]; i++)
         upper[i] = (char)toupper((unsigned char)s[i]);
     upper[i] = '\0';
 
@@ -260,7 +279,7 @@ static int json_get_author_npm(const char *json, lst_dep_t *dep) {
         }
     }
 
-    /* Also check "author": { "name": "..." } */
+    /* Also check "author": { "name": ... } */
     if (dep->author_count == 0) {
         const char *p = strstr(json, "\"author\"");
         if (p) {
@@ -279,7 +298,12 @@ static int json_get_author_npm(const char *json, lst_dep_t *dep) {
     return dep->author_count;
 }
 
-/* Find and extract copyright line from LICENSE file in a directory */
+/* Find and extract copyright line from LICENSE file in a directory.
+ * `dir` chains from the caller-supplied project path plus readdir() names;
+ * the fixed filenames from names[] are appended to it. All reads go through
+ * read_file(), which canonicalizes with realpath() — following symlinks
+ * wherever they point, including outside the project tree — and then opens
+ * with O_NOFOLLOW to reject a symlink at the final resolved path. */
 static void find_copyright(const char *dir, char *dst, size_t maxlen) {
     dst[0] = '\0';
     const char *names[] = {

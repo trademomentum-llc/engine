@@ -6,6 +6,9 @@
  * Store once, read by any recipe, any number of times.
  */
 
+#define _XOPEN_SOURCE 700
+#define _POSIX_C_SOURCE 200809L
+
 #include "lst.h"
 
 #include <stdio.h>
@@ -13,47 +16,84 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <dirent.h>
-#include <ctype.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 /* Artifact file extension */
 #define LST_EXT ".lst"
 
-/* Build the store path for a given project name */
-static void store_path(char *dst, size_t maxlen, const char *store_dir, const char *project_name) {
-    /* Sanitize project name as a single safe filename component */
+/* Build the store path for a given project name.
+ * Returns 0 on success, -1 if project_name is unsafe, -2 if store_dir
+ * cannot be canonicalized, -3 if the composed path would not fit
+ * (no silent truncation). */
+static int store_path(char *dst, size_t maxlen, const char *store_dir, const char *project_name) {
+    /* Reject traversal and hostile names outright */
+    if (!project_name || !project_name[0]) return -1;
+    if (project_name[0] == '.') return -1;              /* ".", "..", hidden   */
+    if (strstr(project_name, "..")) return -1;          /* parent traversal    */
+    if (strchr(project_name, '\\')) return -1;          /* alternate separator */
+    if (strlen(project_name) >= LST_MAX_NAME) return -1;
+    for (const unsigned char *p = (const unsigned char *)project_name; *p; p++)
+        if (*p < 0x20 || *p == 0x7f) return -1;         /* control chars       */
+
+    /* Sanitize project name: replace / with _ (unchanged for legitimate names) */
     char safe_name[LST_MAX_NAME];
-    size_t i, j = 0;
-
-    for (i = 0; project_name[i] && j < LST_MAX_NAME - 1; i++) {
-        unsigned char c = (unsigned char)project_name[i];
-        if (isalnum(c) || c == '-' || c == '_' || c == '.') {
-            safe_name[j++] = (char)c;
-        } else {
-            safe_name[j++] = '_';
-        }
+    size_t i;
+    for (i = 0; project_name[i]; i++) {
+        safe_name[i] = (project_name[i] == '/') ? '_' : project_name[i];
     }
-    safe_name[j] = '\0';
+    safe_name[i] = '\0';
 
-    /* Prevent traversal-equivalent or empty names */
-    if (j == 0 || strcmp(safe_name, ".") == 0 || strcmp(safe_name, "..") == 0) {
-        strncpy(safe_name, "unnamed", sizeof(safe_name) - 1);
-        safe_name[sizeof(safe_name) - 1] = '\0';
-    }
-
-    snprintf(dst, maxlen, "%s/%s%s", store_dir, safe_name, LST_EXT);
+    /* Canonicalize store_dir: realpath() resolves ".." and follows symlinks
+     * at every level of the directory tree, so canon_dir is the store's real
+     * location — which can be outside the path spelling the caller passed.
+     * dst is composed as <canon_dir>/<safe_name>.lst where safe_name is a
+     * single validated component (no separators, no ".."), so the composed
+     * path resolves inside canon_dir. Confinement holds relative to the
+     * canonical store directory only; open() adds O_NOFOLLOW to reject a
+     * symlink at the final resolved component. */
+    char *canon_dir = realpath(store_dir, NULL);
+    if (!canon_dir) return -2;
+    int n = snprintf(dst, maxlen, "%s/%s%s", canon_dir, safe_name, LST_EXT);
+    free(canon_dir);
+    if (n < 0 || (size_t)n >= maxlen) return -3;
+    return 0;
 }
 
 int lst_store_write(const lst_artifact_t *art, const char *store_dir) {
     if (!art || !store_dir) return -1;
 
     /* Ensure store directory exists */
-    mkdir(store_dir, S_IRWXU);
+    mkdir(store_dir, 0755);
 
     char path[LST_MAX_PATH];
-    store_path(path, sizeof(path), store_dir, art->project_name);
+    int prc = store_path(path, sizeof(path), store_dir, art->project_name);
+    if (prc == -1) {
+        fprintf(stderr, "store: unsafe project name: %s\n", art->project_name);
+        return -1;
+    }
+    if (prc == -2) {
+        /* Report the failing input, not a composed path — no valid
+         * on-disk path exists to print. */
+        fprintf(stderr, "store: cannot canonicalize store directory: %s\n", store_dir);
+        return -1;
+    }
+    if (prc != 0) {
+        /* -3: the real (canonical) directory plus sanitized name would
+         * overflow LST_MAX_PATH. Report the store directory as context;
+         * the composed path was never materialized. */
+        fprintf(stderr, "store: composed path too long under store directory: %s\n", store_dir);
+        return -1;
+    }
 
-    FILE *f = lst_secure_fopen(path, "wb");
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);
+    if (fd < 0) {
+        fprintf(stderr, "store: cannot write %s\n", path);
+        return -1;
+    }
+    FILE *f = fdopen(fd, "wb");
     if (!f) {
+        close(fd);
         fprintf(stderr, "store: cannot write %s\n", path);
         return -1;
     }
@@ -73,10 +113,13 @@ lst_artifact_t *lst_store_read(const char *store_dir, const char *project_name) 
     if (!store_dir || !project_name) return NULL;
 
     char path[LST_MAX_PATH];
-    store_path(path, sizeof(path), store_dir, project_name);
+    if (store_path(path, sizeof(path), store_dir, project_name) != 0)
+        return NULL;
 
-    FILE *f = lst_secure_fopen(path, "rb");
-    if (!f) return NULL;
+    int fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0) return NULL;
+    FILE *f = fdopen(fd, "rb");
+    if (!f) { close(fd); return NULL; }
 
     lst_artifact_t *art = calloc(1, sizeof(lst_artifact_t));
     if (!art) { fclose(f); return NULL; }
@@ -94,7 +137,8 @@ lst_artifact_t *lst_store_read(const char *store_dir, const char *project_name) 
 
 int lst_store_is_current(const char *store_dir, const char *project_name) {
     char path[LST_MAX_PATH];
-    store_path(path, sizeof(path), store_dir, project_name);
+    if (store_path(path, sizeof(path), store_dir, project_name) != 0)
+        return 0;
 
     struct stat st;
     if (stat(path, &st) != 0) return 0; /* doesn't exist */

@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 /*
  * jasterish_validation.c -- Jasterish Validation Recipe
  *
@@ -21,6 +23,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <dirent.h>
 
 /* --------------------------------------------------------------------------
@@ -91,7 +95,7 @@ static const char *SKIP_DIRS_JST[] = {
  * -------------------------------------------------------------------------- */
 
 static char *read_file_jst(const char *path, size_t *out_len) {
-    FILE *f = lst_secure_fopen(path, "rb");
+    FILE *f = fopen(path, "rb");
     if (!f) return NULL;
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
@@ -225,7 +229,7 @@ static int check_fixpoint_hashes(lst_artifact_t *art, const char *project_path) 
             if (*p != '\0' && *p != '#') {
                 /* Take first 64 hex chars or up to first space */
                 size_t clen = 0;
-                while (p[clen] && p[clen] != ' ' && p[clen] != '\t' && clen < 127)
+                while (clen < 127 && p[clen] && p[clen] != ' ' && p[clen] != '\t')
                     clen++;
                 memcpy(current_hash, p, clen);
                 current_hash[clen] = '\0';
@@ -485,8 +489,14 @@ static int recipe_jasterish_validation(lst_artifact_t *art, const char *output_d
 
     if (output_dir) mkdir(output_dir, 0755);
 
-    FILE *f = lst_secure_fopen(outpath, "w");
+    int rfd = open(outpath, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0644);
+    if (rfd < 0) {
+        fprintf(stderr, "jasterish-validation: cannot write %s\n", outpath);
+        return -1;
+    }
+    FILE *f = fdopen(rfd, "w");
     if (!f) {
+        close(rfd);
         fprintf(stderr, "jasterish-validation: cannot write %s\n", outpath);
         return -1;
     }
@@ -501,7 +511,11 @@ static int recipe_jasterish_validation(lst_artifact_t *art, const char *output_d
     struct tm tm_buf;
     struct tm *t = gmtime_r(&now, &tm_buf);
     char ts[64];
-    strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S UTC", t);
+    if (t) {
+        strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S UTC", t);
+    } else {
+        snprintf(ts, sizeof(ts), "1970-01-01 00:00:00 UTC");
+    }
     fprintf(f, "Generated: %s\n", ts);
     fprintf(f, "Jasterish Sources: %d\n", jst_sources);
     fprintf(f, "Total Files Scanned: %d\n", total_files);

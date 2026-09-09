@@ -1,15 +1,62 @@
 #include "logger.hpp"
 #include <iostream>
 #include <cstdlib>
+#include <cctype>
+#include <climits>
+#include <cstdio>
+#include <stdlib.h>  // realpath
+#include <time.h>    // localtime_r
 
 namespace nnos {
+
+namespace {
+
+// Canonicalize the log directory: resolve NNOS_LOG_DIR (or the default
+// root) with realpath so '..' and symlinked components are eliminated.
+// Fail closed to the default root if the env-supplied directory cannot
+// be canonicalized.
+std::string canonical_log_dir() {
+    const std::string fallback = "/var/log/lsa";
+    const char* env = std::getenv("NNOS_LOG_DIR");
+    const std::string dir = (env && env[0]) ? env : fallback;
+    char resolved[PATH_MAX];
+    if (realpath(dir.c_str(), resolved) != nullptr)
+        return std::string(resolved);
+    if (dir != fallback && realpath(fallback.c_str(), resolved) != nullptr)
+        return std::string(resolved);
+    return fallback;
+}
+
+// The daemon name becomes the single filename component of the log path:
+// reject path separators, '..' sequences, and control characters so it
+// cannot escape the canonicalized log directory.
+bool safe_daemon_name(const std::string& name) {
+    if (name.empty()) return false;
+    if (name.find('/') != std::string::npos) return false;
+    if (name.find("..") != std::string::npos) return false;
+    for (unsigned char c : name) {
+        if (std::iscntrl(c)) return false;
+    }
+    return true;
+}
+
+} // namespace
 
 Logger::Logger(const std::string& daemon_name)
     : daemon_name_(daemon_name)
 {
-    const char* log_dir = std::getenv("NNOS_LOG_DIR");
-    std::string dir = log_dir ? log_dir : "/var/log/lsa";
+    if (!safe_daemon_name(daemon_name)) {
+        std::cerr << "[NNOS] Refusing unsafe log name: " << daemon_name << std::endl;
+        return;
+    }
+    std::string dir = canonical_log_dir();
     std::string path = dir + "/" + daemon_name + ".jsonl";
+    // Confinement: the final path must live directly inside the
+    // canonicalized log directory.
+    if (path.compare(0, dir.size() + 1, dir + "/") != 0) {
+        std::cerr << "[NNOS] Refusing log path outside log dir: " << path << std::endl;
+        return;
+    }
     file_.open(path, std::ios::app);
     if (!file_) {
         std::cerr << "[NNOS] Failed to open log: " << path << std::endl;

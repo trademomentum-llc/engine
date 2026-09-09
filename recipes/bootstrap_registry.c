@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 /*
  * bootstrap_registry.c -- Bootstrap Registry Validation Recipe
  *
@@ -19,6 +21,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <dirent.h>
 
 /* --------------------------------------------------------------------------
@@ -94,7 +98,7 @@ static const char *SKIP_DIRS_BSR[] = {
  * -------------------------------------------------------------------------- */
 
 static char *read_file_bsr(const char *path, size_t *out_len) {
-    FILE *f = lst_secure_fopen(path, "rb");
+    FILE *f = fopen(path, "rb");
     if (!f) return NULL;
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
@@ -277,9 +281,9 @@ static void scan_file_bsr(lst_artifact_t *art, const char *fpath,
                 while (p) {
                     char token[128];
                     int ti = 0;
-                    while (p[ti] && (p[ti] == '_' ||
+                    while (ti < 127 && p[ti] && (p[ti] == '_' ||
                            (p[ti] >= 'a' && p[ti] <= 'z') ||
-                           (p[ti] >= '0' && p[ti] <= '9')) && ti < 127) {
+                           (p[ti] >= '0' && p[ti] <= '9'))) {
                         token[ti] = p[ti];
                         ti++;
                     }
@@ -431,8 +435,14 @@ static int write_report_bsr(lst_artifact_t *art, const char *output_dir,
 
     if (output_dir) mkdir(output_dir, 0755);
 
-    FILE *f = lst_secure_fopen(outpath, "w");
+    int rfd = open(outpath, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0644);
+    if (rfd < 0) {
+        fprintf(stderr, "bootstrap-registry: cannot write %s\n", outpath);
+        return -1;
+    }
+    FILE *f = fdopen(rfd, "w");
     if (!f) {
+        close(rfd);
         fprintf(stderr, "bootstrap-registry: cannot write %s\n", outpath);
         return -1;
     }
@@ -448,7 +458,11 @@ static int write_report_bsr(lst_artifact_t *art, const char *output_dir,
     struct tm tm_buf;
     struct tm *t = gmtime_r(&now, &tm_buf);
     char ts[64];
-    strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S UTC", t);
+    if (t) {
+        strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S UTC", t);
+    } else {
+        snprintf(ts, sizeof(ts), "1970-01-01 00:00:00 UTC");
+    }
     fprintf(f, "Generated: %s\n", ts);
     fprintf(f, "Issues Found: %u\n", new_issues);
     write_sep_bsr(f);
