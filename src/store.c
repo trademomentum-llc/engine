@@ -102,8 +102,10 @@ lst_artifact_t *lst_store_read(const char *store_dir, const char *project_name) 
     if (store_path(path, sizeof(path), store_dir, project_name) != 0)
         return NULL;
 
-    FILE *f = fopen(path, "rb");
-    if (!f) return NULL;
+    int fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0) return NULL;
+    FILE *f = fdopen(fd, "rb");
+    if (!f) { close(fd); return NULL; }
 
     lst_artifact_t *art = calloc(1, sizeof(lst_artifact_t));
     if (!art) { fclose(f); return NULL; }
