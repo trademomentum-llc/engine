@@ -271,9 +271,8 @@ static int json_get_author_npm(const char *json, lst_dep_t *dep) {
 /* Find and extract copyright line from LICENSE file in a directory.
  * `dir` chains from the caller-supplied project path plus readdir() names;
  * the fixed filenames from names[] are appended to it. All reads go through
- * read_file(), which enforces the canonicalization contract documented
- * there (realpath + O_NOFOLLOW), so the composed path cannot resolve to a
- * file outside `dir`. */
+ * read_file(), which canonicalizes with realpath() and then opens with
+ * O_NOFOLLOW to reject a symlink at the final resolved path. */
 static void find_copyright(const char *dir, char *dst, size_t maxlen) {
     dst[0] = '\0';
     const char *names[] = {
