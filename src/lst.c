@@ -349,13 +349,16 @@ lst_artifact_t *lst_create(const char *project_path) {
     art->version = 1;
     art->built_at = time(NULL);
 
-    scopy(art->project_path, project_path, LST_MAX_PATH);
-
-    /* Extract project name from the canonical path's basename, so raw
-     * spellings like "." or "dir/" still yield a usable, store-safe name.
-     * Falls back to the raw spelling if the path cannot be resolved. */
+    /* Store the canonical project path so recipe scanners that join
+     * art->project_path with readdir() names never feed lst_secure_fopen()
+     * a spelling that still contains ".." (which it rejects). Falls back
+     * to the raw spelling if the path cannot be resolved. */
     char *rp = realpath(project_path, NULL);
     const char *base = rp ? rp : project_path;
+    scopy(art->project_path, base, LST_MAX_PATH);
+
+    /* Extract project name from the (canonical) path's basename, so raw
+     * spellings like "." or "dir/" still yield a usable, store-safe name. */
     const char *name = strrchr(base, '/');
     scopy(art->project_name, name ? name + 1 : base, LST_MAX_NAME);
     free(rp);

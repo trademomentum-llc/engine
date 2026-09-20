@@ -260,7 +260,7 @@ int lst_seal_verify(const char *file_path) {
     int fd = seal_open_data_fd(canon);
     if (fd < 0) return -1;
     struct stat st;
-    if (fstat(fd, &st) != 0) {
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
         close(fd);
         return -1;
     }
