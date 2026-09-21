@@ -164,6 +164,12 @@ static FILE *seal_marker_stream(int fd, const char *mode, int require_regular) {
             close(fd);
             return NULL;
         }
+
+        int flags = fcntl(fd, F_GETFL);
+        if (flags < 0 || fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) != 0) {
+            close(fd);
+            return NULL;
+        }
     }
 
     FILE *f = fdopen(fd, mode);
