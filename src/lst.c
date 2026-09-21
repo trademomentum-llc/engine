@@ -164,6 +164,7 @@ static int json_get_string(const char *json, const char *key, char *dst, size_t 
 static int json_get_license(const char *json, char *dst, size_t maxlen) {
     dst[0] = '\0';
     const char *p = strstr(json, "\"license\"");
+    int found = 0;
     if (!p) return 0;
     p += 9; /* strlen("\"license\"") */
     while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == ':')) p++;
@@ -174,9 +175,9 @@ static int json_get_license(const char *json, char *dst, size_t maxlen) {
         size_t i = 0;
         while (*p && *p != '"' && i < maxlen - 1) dst[i++] = *p++;
         dst[i] = '\0';
-        return 1;
-    }
-    if (*p == '[') {
+        if (*p == '"') p++;
+        found = 1;
+    } else if (*p == '[') {
         /* Array — join with " OR " */
         size_t off = 0;
         int first = 1;
@@ -194,9 +195,10 @@ static int json_get_license(const char *json, char *dst, size_t maxlen) {
             }
         }
         dst[off] = '\0';
-        return 1;
+        if (*p == ']') p++;
+        found = 1;
     }
-    return 0;
+    return found;
 }
 
 /* Map license string to license_t enum */
