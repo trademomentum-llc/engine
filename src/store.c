@@ -11,6 +11,7 @@
 
 #include "lst.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,6 +22,28 @@
 
 /* Artifact file extension */
 #define LST_EXT ".lst"
+
+static int ensure_private_store_dir(const char *store_dir) {
+    if (mkdir(store_dir, 0700) != 0 && errno != EEXIST) {
+        fprintf(stderr, "store: cannot create store directory: %s\n", store_dir);
+        return -1;
+    }
+
+    struct stat st;
+    if (stat(store_dir, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        fprintf(stderr, "store: cannot access store directory: %s\n", store_dir);
+        return -1;
+    }
+
+    if ((st.st_mode & 0777) != 0700) {
+        if (chmod(store_dir, 0700) != 0) {
+            fprintf(stderr, "store: store directory must be private (0700): %s\n", store_dir);
+            return -1;
+        }
+    }
+
+    return 0;
+}
 
 /* Build the store path for a given project name.
  * Returns 0 on success, -1 if project_name is unsafe, -2 if store_dir
@@ -63,8 +86,10 @@ static int store_path(char *dst, size_t maxlen, const char *store_dir, const cha
 int lst_store_write(const lst_artifact_t *art, const char *store_dir) {
     if (!art || !store_dir) return -1;
 
-    /* Ensure store directory exists */
-    mkdir(store_dir, 0700);
+    /* Ensure store directory exists and is private even if it predates the
+     * 0700 hardening. */
+    if (ensure_private_store_dir(store_dir) != 0)
+        return -1;
 
     char path[LST_MAX_PATH];
     int prc = store_path(path, sizeof(path), store_dir, art->project_name);

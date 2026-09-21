@@ -12,9 +12,10 @@
  *     result can legitimately land outside the directory the caller
  *     composed — no confinement to any base directory is claimed or
  *     enforced here. What is guaranteed: (1) the canonical form is the
- *     single path spelling used for all operations below, and (2) file
- *     and marker opens use O_NOFOLLOW, rejecting a symlink at the final
- *     resolved component. The seal marker is composed as
+ *     path spelling used to locate the resolved parent directory, and
+ *     (2) file and marker opens then happen relative to the same parent
+ *     directory descriptor with O_NOFOLLOW, rejecting a symlink at the
+ *     final resolved component. The seal marker is composed as
  *     "<canonical path>.sealed" and lands beside the resolved file,
  *     wherever that resolution points.
  *   - Permission changes are performed with fchmod() on an O_NOFOLLOW
@@ -91,13 +92,59 @@ static FILE *seal_marker_open(const char *marker, const char *mode) {
 
 /* Best-effort fchmod of path via a fresh O_NOFOLLOW descriptor — same
  * "ignore the result" semantics as the historical chmod-by-name calls. */
-static void seal_fchmod_best_effort(const char *path, mode_t mode) {
-    int fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+static void seal_fchmod_best_effort_at(int dirfd, const char *path, mode_t mode) {
+    int fd = openat(dirfd, path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
     if (fd < 0) return;
     struct stat st;
     if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode))
         fchmod(fd, mode);
     close(fd);
+}
+
+/* Open the canonical parent directory one component at a time so later
+ * openat() calls for the data file and its marker are anchored to the same
+ * verified directory descriptor. Returns the parent directory fd and copies
+ * the final basename to leaf. */
+static int seal_open_parent_dir(const char *canon, char *leaf, size_t leaf_size) {
+    if (!canon || canon[0] != '/') return -1;
+
+    const char *slash = strrchr(canon, '/');
+    if (!slash || !slash[1]) return -1;
+
+    size_t leaf_len = strlen(slash + 1);
+    if (leaf_len == 0 || leaf_len >= leaf_size) return -1;
+    memcpy(leaf, slash + 1, leaf_len + 1);
+
+    int dirfd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (dirfd < 0) return -1;
+
+    const char *p = canon + 1;
+    while (p < slash) {
+        const char *next = p;
+        while (next < slash && *next != '/') next++;
+
+        size_t len = (size_t)(next - p);
+        if (len > 0) {
+            char component[LST_MAX_NAME];
+            if (len >= sizeof(component)) {
+                close(dirfd);
+                return -1;
+            }
+            memcpy(component, p, len);
+            component[len] = '\0';
+
+            int nextfd = openat(dirfd, component,
+                                O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+            close(dirfd);
+            if (nextfd < 0) return -1;
+            dirfd = nextfd;
+        }
+
+        p = next;
+        if (p < slash && *p == '/') p++;
+    }
+
+    return dirfd;
 }
 
 /* Open a data file for seal/verify inspection. O_RDONLY|O_NONBLOCK so a
@@ -109,11 +156,31 @@ static void seal_fchmod_best_effort(const char *path, mode_t mode) {
  * write-only FIFO fail promptly (ENXIO) rather than block awaiting a
  * reader. O_NOFOLLOW rejects a symlink at the final resolved component.
  * Caller must fstat() and reject anything that is not a regular file. */
-static int seal_open_data_fd(const char *path) {
-    int fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+static int seal_open_data_fd_at(int dirfd, const char *path) {
+    int fd = openat(dirfd, path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
     if (fd < 0 && errno == EACCES)
-        fd = open(path, O_WRONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+        fd = openat(dirfd, path, O_WRONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
     return fd;
+}
+
+static FILE *seal_marker_open_at(int dirfd, const char *leaf, const char *mode) {
+    char marker[LST_MAX_PATH];
+    if (seal_marker_path(marker, sizeof(marker), leaf) != 0) return NULL;
+
+    int flags = O_NOFOLLOW | O_CLOEXEC;
+    if (mode[0] == 'w')
+        flags |= O_WRONLY | O_CREAT | O_TRUNC;
+    else
+        flags |= O_RDONLY;
+
+    int fd = openat(dirfd, marker, flags, 0644);
+    if (fd < 0) return NULL;
+    FILE *f = fdopen(fd, mode);
+    if (!f) {
+        close(fd);
+        return NULL;
+    }
+    return f;
 }
 
 #ifdef __linux__
@@ -155,33 +222,35 @@ int lst_seal(const char *file_path) {
         return -1;
     }
 
+    char leaf[LST_MAX_NAME];
+    int dirfd = seal_open_parent_dir(canon, leaf, sizeof(leaf));
+    if (dirfd < 0) {
+        fprintf(stderr, "seal: file not found: %s\n", file_path);
+        return -1;
+    }
+
     /* Open once by descriptor: fstat/fchmod act on the same file, closing
      * the stat-then-chmod race window. O_NONBLOCK keeps FIFOs from
      * blocking; the EACCES retry covers owner-write-only regular files. */
-    int fd = seal_open_data_fd(canon);
+    int fd = seal_open_data_fd_at(dirfd, leaf);
     if (fd < 0) {
         fprintf(stderr, "seal: file not found: %s\n", file_path);
+        close(dirfd);
         return -1;
     }
     struct stat st;
     if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
         fprintf(stderr, "seal: file not found: %s\n", file_path);
         close(fd);
+        close(dirfd);
         return -1;
     }
 
-    /* Write seal marker */
-    char marker[LST_MAX_PATH];
-    if (seal_marker_path(marker, sizeof(marker), canon) != 0) {
-        fprintf(stderr, "seal: marker path too long for: %s\n", file_path);
-        close(fd);
-        return -1;
-    }
-
-    FILE *f = seal_marker_open(marker, "w");
+    FILE *f = seal_marker_open_at(dirfd, leaf, "w");
     if (!f) {
-        fprintf(stderr, "seal: cannot write marker: %s\n", marker);
+        fprintf(stderr, "seal: cannot write marker: %s.sealed\n", canon);
         close(fd);
+        close(dirfd);
         return -1;
     }
 
@@ -208,6 +277,7 @@ int lst_seal(const char *file_path) {
     /* Set read-only: 444 (fd-based; no path re-lookup) */
     fchmod(fd, S_IRUSR | S_IRGRP | S_IROTH);
     close(fd);
+    close(dirfd);
 
     /* On Linux, try chattr +i */
 #ifdef __linux__
@@ -224,11 +294,12 @@ int lst_seal_verify(const char *file_path) {
     if (seal_canonicalize(file_path, canon, sizeof(canon)) != 0)
         return -1;
 
-    char marker[LST_MAX_PATH];
-    if (seal_marker_path(marker, sizeof(marker), canon) != 0)
+    char leaf[LST_MAX_NAME];
+    int dirfd = seal_open_parent_dir(canon, leaf, sizeof(leaf));
+    if (dirfd < 0)
         return -1;
 
-    FILE *f = seal_marker_open(marker, "r");
+    FILE *f = seal_marker_open_at(dirfd, leaf, "r");
     if (!f) {
         /* Legacy fallback: files sealed through a final-component symlink
          * have their marker at "<original spelling>.sealed", beside the
@@ -240,7 +311,10 @@ int lst_seal_verify(const char *file_path) {
             seal_marker_path(legacy, sizeof(legacy), file_path) == 0)
             f = seal_marker_open(legacy, "r");
     }
-    if (!f) return -1; /* no seal marker = not sealed */
+    if (!f) {
+        close(dirfd);
+        return -1; /* no seal marker = not sealed */
+    }
 
     long stored_size = -1;
     long stored_mtime = -1;
@@ -254,17 +328,24 @@ int lst_seal_verify(const char *file_path) {
     }
     fclose(f);
 
-    /* Verify current file matches — fd-based: open the canonical path
-     * with O_NOFOLLOW and fstat that descriptor, so the check acts on
-     * the same inode that was opened (no path re-lookup race). */
-    int fd = seal_open_data_fd(canon);
-    if (fd < 0) return -1;
+    /* Verify current file matches: once the canonical parent directory is
+     * open, both the marker and the data file are opened relative to that
+     * same descriptor, so a rename after the parent is opened cannot
+     * retarget one without the other. Canonicalization itself still happens
+     * by pathname before this point. */
+    int fd = seal_open_data_fd_at(dirfd, leaf);
+    if (fd < 0) {
+        close(dirfd);
+        return -1;
+    }
     struct stat st;
     if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
         close(fd);
+        close(dirfd);
         return -1;
     }
     close(fd);
+    close(dirfd);
 
     if ((long)st.st_size != stored_size) {
         fprintf(stderr, "seal: INTEGRITY VIOLATION — size mismatch: %s\n", file_path);
@@ -294,17 +375,26 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
         return -1;
     }
 
+    char leaf[LST_MAX_NAME];
+    int dirfd = seal_open_parent_dir(canon, leaf, sizeof(leaf));
+    if (dirfd < 0) {
+        fprintf(stderr, "seal: cannot open for amendment: %s\n", file_path);
+        return -1;
+    }
+
     /* Temporarily make writable via descriptor (no chmod-by-name).
      * seal_open_data_fd keeps FIFOs from blocking and covers
      * owner-write-only regular files via its EACCES retry. */
-    int fd = seal_open_data_fd(canon);
+    int fd = seal_open_data_fd_at(dirfd, leaf);
     if (fd < 0) {
         fprintf(stderr, "seal: cannot open for amendment: %s\n", file_path);
+        close(dirfd);
         return -1;
     }
     struct stat st;
     if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
         close(fd);
+        close(dirfd);
         fprintf(stderr, "seal: cannot open for amendment: %s\n", file_path);
         return -1;
     }
@@ -312,14 +402,16 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     close(fd);
 
     /* Append amendment */
-    int afd = open(canon, O_WRONLY | O_APPEND | O_NOFOLLOW | O_CLOEXEC);
+    int afd = openat(dirfd, leaf, O_WRONLY | O_APPEND | O_NOFOLLOW | O_CLOEXEC);
     if (afd < 0) {
         fprintf(stderr, "seal: cannot open for amendment: %s\n", file_path);
+        close(dirfd);
         return -1;
     }
     FILE *f = fdopen(afd, "a");
     if (!f) {
         close(afd);
+        close(dirfd);
         fprintf(stderr, "seal: cannot open for amendment: %s\n", file_path);
         return -1;
     }
@@ -340,8 +432,10 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
 
     /* Make seal marker writable, then re-seal */
     char marker[LST_MAX_PATH];
-    if (seal_marker_path(marker, sizeof(marker), canon) == 0)
-        seal_fchmod_best_effort(marker, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    if (seal_marker_path(marker, sizeof(marker), leaf) == 0)
+        seal_fchmod_best_effort_at(dirfd, marker,
+                                   S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    close(dirfd);
 
     return lst_seal(file_path);
 }
