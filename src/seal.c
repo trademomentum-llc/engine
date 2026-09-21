@@ -45,6 +45,8 @@
 
 #define SEAL_MARKER_EXT ".sealed"
 
+static FILE *seal_marker_stream(int fd, const char *mode, int require_regular);
+
 /* Build "<file_path>.sealed". Returns -1 if it would not fit — no silent
  * truncation. */
 static int seal_marker_path(char *dst, size_t maxlen, const char *file_path) {
@@ -74,23 +76,6 @@ static int seal_canonicalize(const char *path, char *dst, size_t maxlen) {
     return 0;
 }
 
-/* Open the seal marker without following a hostile final-component symlink. */
-static FILE *seal_marker_open(const char *marker, const char *mode) {
-    int flags = O_NOFOLLOW | O_CLOEXEC;
-    if (mode[0] == 'w')
-        flags |= O_WRONLY | O_CREAT | O_TRUNC;
-    else
-        flags |= O_RDONLY;
-    int fd = open(marker, flags, 0600);
-    if (fd < 0) return NULL;
-    FILE *f = fdopen(fd, mode);
-    if (!f) {
-        close(fd);
-        return NULL;
-    }
-    return f;
-}
-
 /* Best-effort fchmod of path via a fresh O_NOFOLLOW descriptor — same
  * "ignore the result" semantics as the historical chmod-by-name calls. */
 static void seal_fchmod_best_effort_at(int dirfd, const char *path, mode_t mode) {
@@ -102,30 +87,20 @@ static void seal_fchmod_best_effort_at(int dirfd, const char *path, mode_t mode)
     close(fd);
 }
 
-/* Open the canonical parent directory one component at a time so later
- * openat() calls for the data file and its marker are anchored to the same
- * verified directory descriptor. Returns the parent directory fd and copies
- * the final basename to leaf. */
-static int seal_open_parent_dir(const char *canon, char *leaf, size_t leaf_size) {
-    if (!canon || canon[0] != '/') return -1;
-
-    const char *slash = strrchr(canon, '/');
-    if (!slash || !slash[1]) return -1;
-
-    size_t leaf_len = strlen(slash + 1);
-    if (leaf_len == 0 || leaf_len >= leaf_size) return -1;
-    memcpy(leaf, slash + 1, leaf_len + 1);
-
+/* Open a canonical absolute directory one component at a time so later
+ * openat() calls stay anchored to a verified directory descriptor. */
+static int seal_open_dir(const char *canon_dir) {
+    if (!canon_dir || canon_dir[0] != '/') return -1;
     int dirfd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (dirfd < 0) return -1;
 
-    if (slash == canon)
+    if (strcmp(canon_dir, "/") == 0)
         return dirfd;
 
-    const char *p = canon + 1;
-    while (p < slash) {
+    const char *p = canon_dir + 1;
+    while (*p) {
         const char *next = p;
-        while (next < slash && *next != '/') next++;
+        while (*next && *next != '/') next++;
 
         size_t len = (size_t)(next - p);
         if (len > 0) {
@@ -145,10 +120,58 @@ static int seal_open_parent_dir(const char *canon, char *leaf, size_t leaf_size)
         }
 
         p = next;
-        if (p < slash && *p == '/') p++;
+        if (*p == '/') p++;
     }
 
     return dirfd;
+}
+
+/* Resolve a path's parent directory without following its final component.
+ * Intermediate directories are canonicalized with realpath(); the final
+ * basename is returned in leaf. */
+static int seal_open_parent_dir(const char *path, char *leaf, size_t leaf_size) {
+    if (!path || !*path) return -1;
+
+    const char *slash = strrchr(path, '/');
+    const char *base = slash ? slash + 1 : path;
+    size_t leaf_len = strlen(base);
+    if (leaf_len == 0 || leaf_len >= leaf_size) return -1;
+    memcpy(leaf, base, leaf_len + 1);
+
+    char parent[LST_MAX_PATH];
+    if (!slash) {
+        memcpy(parent, ".", 2);
+    } else if (slash == path) {
+        memcpy(parent, "/", 2);
+    } else {
+        size_t parent_len = (size_t)(slash - path);
+        if (parent_len >= sizeof(parent)) return -1;
+        memcpy(parent, path, parent_len);
+        parent[parent_len] = '\0';
+    }
+
+    char canon_parent[LST_MAX_PATH];
+    if (seal_canonicalize(parent, canon_parent, sizeof(canon_parent)) != 0)
+        return -1;
+
+    return seal_open_dir(canon_parent);
+}
+
+static FILE *seal_marker_stream(int fd, const char *mode, int require_regular) {
+    if (require_regular) {
+        struct stat st;
+        if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+            close(fd);
+            return NULL;
+        }
+    }
+
+    FILE *f = fdopen(fd, mode);
+    if (!f) {
+        close(fd);
+        return NULL;
+    }
+    return f;
 }
 
 /* Open a data file for seal/verify inspection. O_RDONLY|O_NONBLOCK so a
@@ -175,16 +198,11 @@ static FILE *seal_marker_open_at(int dirfd, const char *leaf, const char *mode) 
     if (mode[0] == 'w')
         flags |= O_WRONLY | O_CREAT | O_TRUNC;
     else
-        flags |= O_RDONLY;
+        flags |= O_RDONLY | O_NONBLOCK;
 
     int fd = openat(dirfd, marker, flags, 0600);
     if (fd < 0) return NULL;
-    FILE *f = fdopen(fd, mode);
-    if (!f) {
-        close(fd);
-        return NULL;
-    }
-    return f;
+    return seal_marker_stream(fd, mode, mode[0] != 'w');
 }
 
 #ifdef __linux__
@@ -272,6 +290,8 @@ int lst_seal(const char *file_path) {
     fprintf(f, "File: %s\n", file_path);
     fprintf(f, "Size: %lld\n", (long long)st.st_size);
     fprintf(f, "Mtime: %ld\n", (long)st.st_mtime);
+    fprintf(f, "Dev: %llu\n", (unsigned long long)st.st_dev);
+    fprintf(f, "Inode: %llu\n", (unsigned long long)st.st_ino);
     fprintf(f, "Status: IMMUTABLE\n");
     /* Make the marker read-only (444) through the descriptor we already
      * hold — no path re-lookup, and it works even under a
@@ -309,12 +329,17 @@ int lst_seal_verify(const char *file_path) {
         /* Legacy fallback: files sealed through a final-component symlink
          * have their marker at "<original spelling>.sealed", beside the
          * symlink, not at the canonical path's marker. Try the as-passed
-         * spelling (same O_NOFOLLOW open) before concluding the file is
+         * spelling through the same parent-dirfd + O_NOFOLLOW path before
+         * concluding the file is
          * not sealed. */
-        char legacy[LST_MAX_PATH];
-        if (strcmp(file_path, canon) != 0 &&
-            seal_marker_path(legacy, sizeof(legacy), file_path) == 0)
-            f = seal_marker_open(legacy, "r");
+        char legacy_leaf[LST_MAX_NAME];
+        int legacy_dirfd = -1;
+        if (strcmp(file_path, canon) != 0)
+            legacy_dirfd = seal_open_parent_dir(file_path, legacy_leaf, sizeof(legacy_leaf));
+        if (legacy_dirfd >= 0) {
+            f = seal_marker_open_at(legacy_dirfd, legacy_leaf, "r");
+            close(legacy_dirfd);
+        }
     }
     if (!f) {
         close(dirfd);
@@ -323,7 +348,11 @@ int lst_seal_verify(const char *file_path) {
 
     long stored_size = -1;
     long stored_mtime = -1;
+    unsigned long long stored_dev = 0;
+    unsigned long long stored_ino = 0;
     int have_mtime = 0;
+    int have_dev = 0;
+    int have_ino = 0;
     char line[512];
 
     while (fgets(line, sizeof(line), f)) {
@@ -332,15 +361,19 @@ int lst_seal_verify(const char *file_path) {
         else if (strncmp(line, "Mtime: ", 7) == 0) {
             stored_mtime = atol(line + 7);
             have_mtime = 1;
+        } else if (strncmp(line, "Dev: ", 5) == 0) {
+            stored_dev = strtoull(line + 5, NULL, 10);
+            have_dev = 1;
+        } else if (strncmp(line, "Inode: ", 7) == 0) {
+            stored_ino = strtoull(line + 7, NULL, 10);
+            have_ino = 1;
         }
     }
     fclose(f);
 
-    /* Verify current file matches: once the canonical parent directory is
-     * open, both the marker and the data file are opened relative to that
-     * same descriptor, so a rename after the parent is opened cannot
-     * retarget one without the other. Canonicalization itself still happens
-     * by pathname before this point. */
+    /* Verify current file against the marker's recorded identity and
+     * fingerprint. Canonicalization itself still happens by pathname before
+     * this point. */
     int fd = seal_open_data_fd_at(dirfd, leaf);
     if (fd < 0) {
         close(dirfd);
@@ -360,8 +393,15 @@ int lst_seal_verify(const char *file_path) {
         return -1;
     }
 
-    if (have_mtime && (long)st.st_mtime != stored_mtime) {
+    if (!have_mtime || (long)st.st_mtime != stored_mtime) {
         fprintf(stderr, "seal: INTEGRITY VIOLATION — mtime mismatch: %s\n", file_path);
+        return -1;
+    }
+
+    if (!have_dev || !have_ino ||
+        (unsigned long long)st.st_dev != stored_dev ||
+        (unsigned long long)st.st_ino != stored_ino) {
+        fprintf(stderr, "seal: INTEGRITY VIOLATION — file identity mismatch: %s\n", file_path);
         return -1;
     }
 
