@@ -359,8 +359,24 @@ lst_artifact_t *lst_create(const char *project_path) {
 
     /* Extract project name from the (canonical) path's basename, so raw
      * spellings like "." or "dir/" still yield a usable, store-safe name. */
-    const char *name = strrchr(base, '/');
-    scopy(art->project_name, name ? name + 1 : base, LST_MAX_NAME);
+    const char *name = base;
+    size_t base_len = strlen(base);
+    while (base_len > 1 && base[base_len - 1] == '/')
+        base_len--;
+    for (size_t i = base_len; i > 0; i--) {
+        if (base[i - 1] == '/') {
+            name = base + i;
+            break;
+        }
+    }
+    if (base_len == 1 && base[0] == '/') {
+        scopy(art->project_name, "root", LST_MAX_NAME);
+    } else {
+        size_t name_len = base_len - (size_t)(name - base);
+        if (name_len >= LST_MAX_NAME) name_len = LST_MAX_NAME - 1;
+        memcpy(art->project_name, name, name_len);
+        art->project_name[name_len] = '\0';
+    }
     free(rp);
 
     return art;

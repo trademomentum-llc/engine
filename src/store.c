@@ -29,19 +29,28 @@ static int ensure_private_store_dir(const char *store_dir) {
         return -1;
     }
 
-    struct stat st;
-    if (stat(store_dir, &st) != 0 || !S_ISDIR(st.st_mode)) {
+    int dirfd = open(store_dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (dirfd < 0) {
         fprintf(stderr, "store: cannot access store directory: %s\n", store_dir);
         return -1;
     }
 
+    struct stat st;
+    if (fstat(dirfd, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        fprintf(stderr, "store: cannot access store directory: %s\n", store_dir);
+        close(dirfd);
+        return -1;
+    }
+
     if ((st.st_mode & 0777) != 0700) {
-        if (chmod(store_dir, 0700) != 0) {
+        if (fchmod(dirfd, 0700) != 0) {
             fprintf(stderr, "store: store directory must be private (0700): %s\n", store_dir);
+            close(dirfd);
             return -1;
         }
     }
 
+    close(dirfd);
     return 0;
 }
 

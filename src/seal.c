@@ -318,13 +318,16 @@ int lst_seal_verify(const char *file_path) {
 
     long stored_size = -1;
     long stored_mtime = -1;
+    int have_mtime = 0;
     char line[512];
 
     while (fgets(line, sizeof(line), f)) {
         if (strncmp(line, "Size: ", 6) == 0)
             stored_size = atol(line + 6);
-        else if (strncmp(line, "Mtime: ", 7) == 0)
+        else if (strncmp(line, "Mtime: ", 7) == 0) {
             stored_mtime = atol(line + 7);
+            have_mtime = 1;
+        }
     }
     fclose(f);
 
@@ -352,7 +355,7 @@ int lst_seal_verify(const char *file_path) {
         return -1;
     }
 
-    if ((long)st.st_mtime != stored_mtime) {
+    if (have_mtime && (long)st.st_mtime != stored_mtime) {
         fprintf(stderr, "seal: INTEGRITY VIOLATION — mtime mismatch: %s\n", file_path);
         return -1;
     }
