@@ -42,7 +42,7 @@ static int ensure_private_store_dir(const char *store_dir) {
         return -1;
     }
 
-    if ((st.st_mode & 0777) != 0700) {
+    if ((st.st_mode & 07777) != 0700) {
         if (fchmod(dirfd, 0700) != 0) {
             fprintf(stderr, "store: store directory must be private (0700): %s\n", store_dir);
             close(dirfd);

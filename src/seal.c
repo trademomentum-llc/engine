@@ -80,7 +80,7 @@ static FILE *seal_marker_open(const char *marker, const char *mode) {
         flags |= O_WRONLY | O_CREAT | O_TRUNC;
     else
         flags |= O_RDONLY;
-    int fd = open(marker, flags, 0644);
+    int fd = open(marker, flags, 0600);
     if (fd < 0) return NULL;
     FILE *f = fdopen(fd, mode);
     if (!f) {
@@ -117,6 +117,9 @@ static int seal_open_parent_dir(const char *canon, char *leaf, size_t leaf_size)
 
     int dirfd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (dirfd < 0) return -1;
+
+    if (slash == canon)
+        return dirfd;
 
     const char *p = canon + 1;
     while (p < slash) {
@@ -173,7 +176,7 @@ static FILE *seal_marker_open_at(int dirfd, const char *leaf, const char *mode) 
     else
         flags |= O_RDONLY;
 
-    int fd = openat(dirfd, marker, flags, 0644);
+    int fd = openat(dirfd, marker, flags, 0600);
     if (fd < 0) return NULL;
     FILE *f = fdopen(fd, mode);
     if (!f) {
@@ -184,9 +187,10 @@ static FILE *seal_marker_open_at(int dirfd, const char *leaf, const char *mode) 
 }
 
 #ifdef __linux__
-/* Best-effort chattr +i without a shell: fork + execvp with an argv array,
+/* Best-effort chattr +i without a shell: fork + execv with a fixed absolute
+ * path and argv array,
  * child stderr redirected to /dev/null, all failures ignored. Preserves the
- * historical "chattr +i '<path>' 2>/dev/null" intent exactly. */
+ * historical "chattr +i '<path>' 2>/dev/null" behavior without PATH lookup. */
 static void seal_chattr_immutable(const char *path) {
     pid_t pid = fork();
     if (pid == 0) {
