@@ -429,7 +429,13 @@ int lst_seal(const char *file_path) {
 
     /* On Linux, try FS_IOC_SETFLAGS on the held descriptor. */
 #ifdef __linux__
-    (void)seal_set_immutable_fd(fd, 1);
+    if (seal_set_immutable_fd(fd, 1) != 0) {
+        unlinkat(dirfd, marker, 0);
+        fprintf(stderr, "seal: cannot seal: %s\n", file_path);
+        close(fd);
+        close(dirfd);
+        return -1;
+    }
 #endif
     close(fd);
     close(dirfd);
@@ -595,12 +601,12 @@ amend_fail:
         close(afd);
     if (marker_writable)
         (void)seal_fchmod_at(dirfd, marker, S_IRUSR | S_IRGRP | S_IROTH);
-    if (made_writable)
-        fchmod(fd, original_mode);
 #ifdef __linux__
     if (restore_immutable)
         (void)seal_set_immutable_fd(fd, 1);
 #endif
+    if (made_writable)
+        fchmod(fd, original_mode);
     close(fd);
     close(dirfd);
     fprintf(stderr, "seal: cannot amend: %s\n", file_path);
