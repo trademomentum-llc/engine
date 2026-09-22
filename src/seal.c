@@ -443,7 +443,7 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     char leaf[LST_MAX_NAME];
     int dirfd = seal_open_parent_dir(canon, leaf, sizeof(leaf));
     if (dirfd < 0) {
-        fprintf(stderr, "seal: cannot open for amendment: %s\n", file_path);
+        fprintf(stderr, "seal: cannot amend: %s\n", file_path);
         return -1;
     }
 
