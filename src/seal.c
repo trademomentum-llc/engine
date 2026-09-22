@@ -81,15 +81,66 @@ static int seal_canonicalize(const char *path, char *dst, size_t maxlen) {
     return 0;
 }
 
-/* Best-effort fchmod of path via a fresh O_NOFOLLOW descriptor — same
- * "ignore the result" semantics as the historical chmod-by-name calls. */
-static void seal_fchmod_best_effort_at(int dirfd, const char *path, mode_t mode) {
+static int seal_fchmod_at(int dirfd, const char *path, mode_t mode) {
     int fd = openat(dirfd, path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
-    if (fd < 0) return;
+    if (fd < 0) return -1;
     struct stat st;
-    if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode))
-        fchmod(fd, mode);
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+        close(fd);
+        return -1;
+    }
+    int rc = fchmod(fd, mode);
     close(fd);
+    return rc;
+}
+
+static int seal_write_marker_at(int dirfd, const char *leaf, const char *file_path,
+                                const struct stat *st) {
+    char marker[LST_MAX_PATH];
+    if (seal_marker_path(marker, sizeof(marker), leaf) != 0)
+        return -1;
+
+    int fd = openat(dirfd, marker,
+                    O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);
+    if (fd < 0)
+        return -1;
+
+    FILE *f = fdopen(fd, "w");
+    if (!f) {
+        close(fd);
+        return -1;
+    }
+
+    time_t now = time(NULL);
+    struct tm tm_buf;
+    struct tm *t = gmtime_r(&now, &tm_buf);
+    char timestamp[64];
+    if (t) {
+        strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", t);
+    } else {
+        snprintf(timestamp, sizeof(timestamp), "1970-01-01T00:00:00Z");
+    }
+
+    if (fprintf(f, "Sealed: %s\n", timestamp) < 0 ||
+        fprintf(f, "File: %s\n", file_path) < 0 ||
+        fprintf(f, "Size: %lld\n", (long long)st->st_size) < 0 ||
+        fprintf(f, "Mtime: %ld\n", (long)st->st_mtime) < 0 ||
+        fprintf(f, "Dev: %llu\n", (unsigned long long)st->st_dev) < 0 ||
+        fprintf(f, "Inode: %llu\n", (unsigned long long)st->st_ino) < 0 ||
+        fprintf(f, "Status: IMMUTABLE\n") < 0 ||
+        fflush(f) != 0 ||
+        fchmod(fd, S_IRUSR | S_IRGRP | S_IROTH) != 0) {
+        fclose(f);
+        unlinkat(dirfd, marker, 0);
+        return -1;
+    }
+
+    if (fclose(f) != 0) {
+        unlinkat(dirfd, marker, 0);
+        return -1;
+    }
+
+    return 0;
 }
 
 /* Open a canonical absolute directory one component at a time so later
@@ -285,35 +336,15 @@ static int seal_verify_marker_against_stat(const char *file_path, const char *ca
 }
 
 #ifdef __linux__
-/* Best-effort chattr flag toggle without a shell: fork + execv with a fixed
- * absolute path (no PATH search) and an argv array; child stderr redirected
- * to /dev/null, all failures ignored. Preserves the historical
- * "chattr +/-i '<path>' 2>/dev/null" behavior without PATH lookup. */
-static void seal_chattr_flag(const char *path, const char *flag) {
-    pid_t pid = fork();
-    if (pid == 0) {
-        int devnull = open("/dev/null", O_WRONLY);
-        if (devnull >= 0) {
-            dup2(devnull, STDERR_FILENO);
-            close(devnull);
-        }
-        char *const args[] = { "chattr", (char *)flag, (char *)path, NULL };
-        execv("/usr/bin/chattr", args);
-        _exit(127);
-    }
-    if (pid > 0) {
-        int status;
-        while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
-            ;
-    }
-}
-
-static void seal_chattr_immutable(const char *path) {
-    seal_chattr_flag(path, "+i");
-}
-
-static void seal_chattr_mutable(const char *path) {
-    seal_chattr_flag(path, "-i");
+static int seal_set_immutable_fd(int fd, int immutable) {
+    unsigned int flags = 0;
+    if (ioctl(fd, FS_IOC_GETFLAGS, &flags) != 0)
+        return -1;
+    if (immutable)
+        flags |= FS_IMMUTABLE_FL;
+    else
+        flags &= ~FS_IMMUTABLE_FL;
+    return ioctl(fd, FS_IOC_SETFLAGS, &flags);
 }
 #endif
 
@@ -356,45 +387,30 @@ int lst_seal(const char *file_path) {
         return -1;
     }
 
-    FILE *f = seal_marker_open_at(dirfd, leaf, "w");
-    if (!f) {
+    if (seal_write_marker_at(dirfd, leaf, file_path, &st) != 0) {
         fprintf(stderr, "seal: cannot write marker: %s.sealed\n", canon);
         close(fd);
         close(dirfd);
         return -1;
     }
 
-    time_t now = time(NULL);
-    struct tm tm_buf;
-    struct tm *t = gmtime_r(&now, &tm_buf);
-    char timestamp[64];
-    if (t) {
-        strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", t);
-    } else {
-        snprintf(timestamp, sizeof(timestamp), "1970-01-01T00:00:00Z");
-    }
-    fprintf(f, "Sealed: %s\n", timestamp);
-    fprintf(f, "File: %s\n", file_path);
-    fprintf(f, "Size: %lld\n", (long long)st.st_size);
-    fprintf(f, "Mtime: %ld\n", (long)st.st_mtime);
-    fprintf(f, "Dev: %llu\n", (unsigned long long)st.st_dev);
-    fprintf(f, "Inode: %llu\n", (unsigned long long)st.st_ino);
-    fprintf(f, "Status: IMMUTABLE\n");
-    /* Make the marker read-only (444) through the descriptor we already
-     * hold — no path re-lookup, and it works even under a
-     * read-restricting umask that would deny re-opening the marker. */
-    fchmod(fileno(f), S_IRUSR | S_IRGRP | S_IROTH);
-    fclose(f);
-
     /* Set read-only: 444 (fd-based; no path re-lookup) */
-    fchmod(fd, S_IRUSR | S_IRGRP | S_IROTH);
+    if (fchmod(fd, S_IRUSR | S_IRGRP | S_IROTH) != 0) {
+        char marker[LST_MAX_PATH];
+        if (seal_marker_path(marker, sizeof(marker), leaf) == 0)
+            unlinkat(dirfd, marker, 0);
+        fprintf(stderr, "seal: cannot seal: %s\n", file_path);
+        close(fd);
+        close(dirfd);
+        return -1;
+    }
+
+    /* On Linux, try FS_IOC_SETFLAGS on the held descriptor. */
+#ifdef __linux__
+    (void)seal_set_immutable_fd(fd, 1);
+#endif
     close(fd);
     close(dirfd);
-
-    /* On Linux, try chattr +i */
-#ifdef __linux__
-    seal_chattr_immutable(canon);
-#endif
 
     return 0;
 }
@@ -471,9 +487,11 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     }
 
     mode_t original_mode = st.st_mode & 07777;
+    char marker[LST_MAX_PATH];
     int afd = -1;
     FILE *f = NULL;
     int made_writable = 0;
+    int marker_writable = 0;
     int restore_immutable = 0;
 
 #ifdef __linux__
@@ -481,8 +499,8 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     if (ioctl(fd, FS_IOC_GETFLAGS, &attr_flags) == 0 &&
         (attr_flags & FS_IMMUTABLE_FL))
         restore_immutable = 1;
-    if (restore_immutable)
-        seal_chattr_mutable(canon);
+    if (restore_immutable && seal_set_immutable_fd(fd, 0) != 0)
+        goto amend_fail;
 #endif
 
     if (fchmod(fd, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH) != 0)
@@ -522,27 +540,39 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
         goto amend_fail;
     }
     f = NULL;
-    close(fd);
 
     /* Make seal marker writable, then re-seal */
-    char marker[LST_MAX_PATH];
-    if (seal_marker_path(marker, sizeof(marker), leaf) == 0)
-        seal_fchmod_best_effort_at(dirfd, marker,
-                                   S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    if (seal_marker_path(marker, sizeof(marker), leaf) != 0)
+        goto amend_fail;
+    if (seal_fchmod_at(dirfd, marker, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH) != 0)
+        goto amend_fail;
+    marker_writable = 1;
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode))
+        goto amend_fail;
+    if (seal_write_marker_at(dirfd, leaf, file_path, &st) != 0)
+        goto amend_fail;
+    marker_writable = 0;
+    if (fchmod(fd, S_IRUSR | S_IRGRP | S_IROTH) != 0)
+        goto amend_fail;
+#ifdef __linux__
+    (void)seal_set_immutable_fd(fd, 1);
+#endif
+    close(fd);
     close(dirfd);
-
-    return lst_seal(file_path);
+    return 0;
 
 amend_fail:
     if (f)
         fclose(f);
     else if (afd >= 0)
         close(afd);
+    if (marker_writable)
+        (void)seal_fchmod_at(dirfd, marker, S_IRUSR | S_IRGRP | S_IROTH);
     if (made_writable)
         fchmod(fd, original_mode);
 #ifdef __linux__
     if (restore_immutable)
-        seal_chattr_immutable(canon);
+        (void)seal_set_immutable_fd(fd, 1);
 #endif
     close(fd);
     close(dirfd);
