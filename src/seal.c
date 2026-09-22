@@ -460,7 +460,7 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
         close(fd);
         close(dirfd);
-        fprintf(stderr, "seal: cannot open for amendment: %s\n", file_path);
+        fprintf(stderr, "seal: cannot amend: %s\n", file_path);
         return -1;
     }
     if (seal_verify_marker_against_stat(file_path, canon, dirfd, leaf, &st) != 0) {
