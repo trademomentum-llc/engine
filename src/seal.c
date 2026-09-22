@@ -211,6 +211,74 @@ static FILE *seal_marker_open_at(int dirfd, const char *leaf, const char *mode) 
     return seal_marker_stream(fd, mode, mode[0] != 'w');
 }
 
+static int seal_verify_marker_against_stat(const char *file_path, const char *canon,
+                                           int dirfd, const char *leaf,
+                                           const struct stat *st) {
+    FILE *f = seal_marker_open_at(dirfd, leaf, "r");
+    if (!f) {
+        /* Legacy fallback: files sealed through a final-component symlink
+         * have their marker at "<original spelling>.sealed", beside the
+         * symlink, not at the canonical path's marker. Try the as-passed
+         * spelling through the same parent-dirfd + O_NOFOLLOW path before
+         * concluding the file is not sealed. */
+        char legacy_leaf[LST_MAX_NAME];
+        int legacy_dirfd = -1;
+        if (strcmp(file_path, canon) != 0)
+            legacy_dirfd = seal_open_parent_dir(file_path, legacy_leaf, sizeof(legacy_leaf));
+        if (legacy_dirfd >= 0) {
+            f = seal_marker_open_at(legacy_dirfd, legacy_leaf, "r");
+            close(legacy_dirfd);
+        }
+    }
+    if (!f)
+        return -1; /* no seal marker = not sealed */
+
+    long stored_size = -1;
+    long stored_mtime = -1;
+    unsigned long long stored_dev = 0;
+    unsigned long long stored_ino = 0;
+    int have_mtime = 0;
+    int have_dev = 0;
+    int have_ino = 0;
+    char line[512];
+
+    while (fgets(line, sizeof(line), f)) {
+        if (strncmp(line, "Size: ", 6) == 0)
+            stored_size = atol(line + 6);
+        else if (strncmp(line, "Mtime: ", 7) == 0) {
+            stored_mtime = atol(line + 7);
+            have_mtime = 1;
+        } else if (strncmp(line, "Dev: ", 5) == 0) {
+            stored_dev = strtoull(line + 5, NULL, 10);
+            have_dev = 1;
+        } else if (strncmp(line, "Inode: ", 7) == 0) {
+            stored_ino = strtoull(line + 7, NULL, 10);
+            have_ino = 1;
+        }
+    }
+    fclose(f);
+
+    if ((long)st->st_size != stored_size) {
+        fprintf(stderr, "seal: INTEGRITY VIOLATION — size mismatch: %s\n", file_path);
+        return -1;
+    }
+
+    if (!have_mtime || (long)st->st_mtime != stored_mtime) {
+        fprintf(stderr, "seal: INTEGRITY VIOLATION — mtime mismatch: %s\n", file_path);
+        return -1;
+    }
+
+    if (have_dev != have_ino ||
+        (have_dev &&
+         ((unsigned long long)st->st_dev != stored_dev ||
+          (unsigned long long)st->st_ino != stored_ino))) {
+        fprintf(stderr, "seal: INTEGRITY VIOLATION — file identity mismatch: %s\n", file_path);
+        return -1;
+    }
+
+    return 0;
+}
+
 #ifdef __linux__
 /* Best-effort chattr +i without a shell: fork + execv with a fixed absolute
  * path (no PATH search) and an argv array; child stderr redirected to
@@ -330,56 +398,6 @@ int lst_seal_verify(const char *file_path) {
     if (dirfd < 0)
         return -1;
 
-    FILE *f = seal_marker_open_at(dirfd, leaf, "r");
-    if (!f) {
-        /* Legacy fallback: files sealed through a final-component symlink
-         * have their marker at "<original spelling>.sealed", beside the
-         * symlink, not at the canonical path's marker. Try the as-passed
-         * spelling through the same parent-dirfd + O_NOFOLLOW path before
-         * concluding the file is
-         * not sealed. */
-        char legacy_leaf[LST_MAX_NAME];
-        int legacy_dirfd = -1;
-        if (strcmp(file_path, canon) != 0)
-            legacy_dirfd = seal_open_parent_dir(file_path, legacy_leaf, sizeof(legacy_leaf));
-        if (legacy_dirfd >= 0) {
-            f = seal_marker_open_at(legacy_dirfd, legacy_leaf, "r");
-            close(legacy_dirfd);
-        }
-    }
-    if (!f) {
-        close(dirfd);
-        return -1; /* no seal marker = not sealed */
-    }
-
-    long stored_size = -1;
-    long stored_mtime = -1;
-    unsigned long long stored_dev = 0;
-    unsigned long long stored_ino = 0;
-    int have_mtime = 0;
-    int have_dev = 0;
-    int have_ino = 0;
-    char line[512];
-
-    while (fgets(line, sizeof(line), f)) {
-        if (strncmp(line, "Size: ", 6) == 0)
-            stored_size = atol(line + 6);
-        else if (strncmp(line, "Mtime: ", 7) == 0) {
-            stored_mtime = atol(line + 7);
-            have_mtime = 1;
-        } else if (strncmp(line, "Dev: ", 5) == 0) {
-            stored_dev = strtoull(line + 5, NULL, 10);
-            have_dev = 1;
-        } else if (strncmp(line, "Inode: ", 7) == 0) {
-            stored_ino = strtoull(line + 7, NULL, 10);
-            have_ino = 1;
-        }
-    }
-    fclose(f);
-
-    /* Verify current file against the marker's recorded identity and
-     * fingerprint. Canonicalization itself still happens by pathname before
-     * this point. */
     int fd = seal_open_data_fd_at(dirfd, leaf);
     if (fd < 0) {
         close(dirfd);
@@ -391,38 +409,17 @@ int lst_seal_verify(const char *file_path) {
         close(dirfd);
         return -1;
     }
+    /* Verify current file against the marker's recorded identity and
+     * fingerprint. Canonicalization itself still happens by pathname before
+     * this point. */
+    int rc = seal_verify_marker_against_stat(file_path, canon, dirfd, leaf, &st);
     close(fd);
     close(dirfd);
-
-    if ((long)st.st_size != stored_size) {
-        fprintf(stderr, "seal: INTEGRITY VIOLATION — size mismatch: %s\n", file_path);
-        return -1;
-    }
-
-    if (!have_mtime || (long)st.st_mtime != stored_mtime) {
-        fprintf(stderr, "seal: INTEGRITY VIOLATION — mtime mismatch: %s\n", file_path);
-        return -1;
-    }
-
-    if (have_dev != have_ino ||
-        (have_dev &&
-         ((unsigned long long)st.st_dev != stored_dev ||
-          (unsigned long long)st.st_ino != stored_ino))) {
-        fprintf(stderr, "seal: INTEGRITY VIOLATION — file identity mismatch: %s\n", file_path);
-        return -1;
-    }
-
-    return 0; /* verified */
+    return rc;
 }
 
 int lst_seal_amend(const char *file_path, const char *amendment) {
     if (!file_path || !amendment) return -1;
-
-    /* Verify seal first */
-    if (lst_seal_verify(file_path) != 0) {
-        fprintf(stderr, "seal: cannot amend — verification failed: %s\n", file_path);
-        return -1;
-    }
 
     char canon[LST_MAX_PATH];
     if (seal_canonicalize(file_path, canon, sizeof(canon)) != 0) {
@@ -453,19 +450,35 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
         fprintf(stderr, "seal: cannot open for amendment: %s\n", file_path);
         return -1;
     }
+    if (seal_verify_marker_against_stat(file_path, canon, dirfd, leaf, &st) != 0) {
+        close(fd);
+        close(dirfd);
+        fprintf(stderr, "seal: cannot amend — verification failed: %s\n", file_path);
+        return -1;
+    }
     fchmod(fd, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-    close(fd);
 
     /* Append amendment */
     int afd = openat(dirfd, leaf, O_WRONLY | O_APPEND | O_NOFOLLOW | O_CLOEXEC);
     if (afd < 0) {
         fprintf(stderr, "seal: cannot open for amendment: %s\n", file_path);
+        close(fd);
         close(dirfd);
+        return -1;
+    }
+    struct stat ast;
+    if (fstat(afd, &ast) != 0 || !S_ISREG(ast.st_mode) ||
+        ast.st_dev != st.st_dev || ast.st_ino != st.st_ino) {
+        close(afd);
+        close(fd);
+        close(dirfd);
+        fprintf(stderr, "seal: cannot open for amendment: %s\n", file_path);
         return -1;
     }
     FILE *f = fdopen(afd, "a");
     if (!f) {
         close(afd);
+        close(fd);
         close(dirfd);
         fprintf(stderr, "seal: cannot open for amendment: %s\n", file_path);
         return -1;
@@ -484,6 +497,7 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     fprintf(f, "\n\n%s\n", amendment);
 
     fclose(f);
+    close(fd);
 
     /* Make seal marker writable, then re-seal */
     char marker[LST_MAX_PATH];
