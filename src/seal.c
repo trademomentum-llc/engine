@@ -129,7 +129,7 @@ static int seal_write_marker_at(int dirfd, const char *leaf, const char *file_pa
         fprintf(f, "Inode: %llu\n", (unsigned long long)st->st_ino) < 0 ||
         fprintf(f, "Status: IMMUTABLE\n") < 0 ||
         fflush(f) != 0 ||
-        fchmod(fd, S_IRUSR | S_IRGRP | S_IROTH) != 0) {
+        fchmod(fileno(f), S_IRUSR | S_IRGRP | S_IROTH) != 0) {
         fclose(f);
         unlinkat(dirfd, marker, 0);
         return -1;
@@ -544,9 +544,11 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     /* Make seal marker writable, then re-seal */
     if (seal_marker_path(marker, sizeof(marker), leaf) != 0)
         goto amend_fail;
-    if (seal_fchmod_at(dirfd, marker, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH) != 0)
+    int marker_mode_rc =
+        seal_fchmod_at(dirfd, marker, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    if (marker_mode_rc != 0 && errno != ENOENT)
         goto amend_fail;
-    marker_writable = 1;
+    marker_writable = (marker_mode_rc == 0);
     if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode))
         goto amend_fail;
     if (seal_write_marker_at(dirfd, leaf, file_path, &st) != 0)
