@@ -85,12 +85,26 @@ static int seal_fchmod_at(int dirfd, const char *path, mode_t mode) {
     int fd = openat(dirfd, path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
     if (fd < 0) return -1;
     struct stat st;
-    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+    if (fstat(fd, &st) != 0) {
+        int saved_errno = errno;
         close(fd);
+        errno = saved_errno;
+        return -1;
+    }
+    if (!S_ISREG(st.st_mode)) {
+        int saved_errno = EINVAL;
+        close(fd);
+        errno = saved_errno;
         return -1;
     }
     int rc = fchmod(fd, mode);
-    close(fd);
+    int saved_errno = errno;
+    if (close(fd) != 0 && rc == 0) {
+        rc = -1;
+        saved_errno = errno;
+    }
+    if (rc != 0)
+        errno = saved_errno;
     return rc;
 }
 
@@ -557,7 +571,8 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     if (fchmod(fd, S_IRUSR | S_IRGRP | S_IROTH) != 0)
         goto amend_fail;
 #ifdef __linux__
-    (void)seal_set_immutable_fd(fd, 1);
+    if (restore_immutable && seal_set_immutable_fd(fd, 1) != 0)
+        goto amend_fail;
 #endif
     close(fd);
     close(dirfd);
