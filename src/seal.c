@@ -481,7 +481,8 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     if (ioctl(fd, FS_IOC_GETFLAGS, &attr_flags) == 0 &&
         (attr_flags & FS_IMMUTABLE_FL))
         restore_immutable = 1;
-    seal_chattr_mutable(canon);
+    if (restore_immutable)
+        seal_chattr_mutable(canon);
 #endif
 
     if (fchmod(fd, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH) != 0)
@@ -545,6 +546,6 @@ amend_fail:
 #endif
     close(fd);
     close(dirfd);
-    fprintf(stderr, "seal: cannot open for amendment: %s\n", file_path);
+    fprintf(stderr, "seal: cannot amend: %s\n", file_path);
     return -1;
 }
