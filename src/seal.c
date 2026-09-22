@@ -404,9 +404,10 @@ int lst_seal_verify(const char *file_path) {
         return -1;
     }
 
-    if (!have_dev || !have_ino ||
-        (unsigned long long)st.st_dev != stored_dev ||
-        (unsigned long long)st.st_ino != stored_ino) {
+    if (have_dev != have_ino ||
+        (have_dev &&
+         ((unsigned long long)st.st_dev != stored_dev ||
+          (unsigned long long)st.st_ino != stored_ino))) {
         fprintf(stderr, "seal: INTEGRITY VIOLATION — file identity mismatch: %s\n", file_path);
         return -1;
     }
