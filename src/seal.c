@@ -40,6 +40,11 @@
 #include <time.h>
 #include <unistd.h>
 
+#ifdef __linux__
+#include <linux/fs.h>
+#include <sys/ioctl.h>
+#endif
+
 /* Simple SHA-256 would go here — for now, use file size + mtime as fingerprint.
  * In production, link against a real SHA-256 (CommonCrypto on macOS, openssl). */
 
@@ -469,8 +474,13 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     int afd = -1;
     FILE *f = NULL;
     int made_writable = 0;
+    int restore_immutable = 0;
 
 #ifdef __linux__
+    unsigned int attr_flags = 0;
+    if (ioctl(fd, FS_IOC_GETFLAGS, &attr_flags) == 0 &&
+        (attr_flags & FS_IMMUTABLE_FL))
+        restore_immutable = 1;
     seal_chattr_mutable(canon);
 #endif
 
@@ -506,7 +516,10 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     for (int i = 0; i < 80; i++) fputc('=', f);
     fprintf(f, "\n\n%s\n", amendment);
 
-    fclose(f);
+    if (fclose(f) != 0) {
+        f = NULL;
+        goto amend_fail;
+    }
     f = NULL;
     close(fd);
 
@@ -527,7 +540,8 @@ amend_fail:
     if (made_writable)
         fchmod(fd, original_mode);
 #ifdef __linux__
-    seal_chattr_immutable(canon);
+    if (restore_immutable)
+        seal_chattr_immutable(canon);
 #endif
     close(fd);
     close(dirfd);
