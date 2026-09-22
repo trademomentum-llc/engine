@@ -428,7 +428,8 @@ int lst_seal(const char *file_path) {
     }
 
     /* On Linux, try FS_IOC_SETFLAGS on the held descriptor as a best-effort
-     * hardening step. */
+     * hardening step. Sealing still succeeds if the kernel/filesystem refuses
+     * or does not support the immutable flag. */
 #ifdef __linux__
     (void)seal_set_immutable_fd(fd, 1);
 #endif
