@@ -280,11 +280,11 @@ static int seal_verify_marker_against_stat(const char *file_path, const char *ca
 }
 
 #ifdef __linux__
-/* Best-effort chattr +i without a shell: fork + execv with a fixed absolute
- * path (no PATH search) and an argv array; child stderr redirected to
- * /dev/null, all failures ignored. Preserves the historical
- * "chattr +i '<path>' 2>/dev/null" behavior without PATH lookup. */
-static void seal_chattr_immutable(const char *path) {
+/* Best-effort chattr flag toggle without a shell: fork + execv with a fixed
+ * absolute path (no PATH search) and an argv array; child stderr redirected
+ * to /dev/null, all failures ignored. Preserves the historical
+ * "chattr +/-i '<path>' 2>/dev/null" behavior without PATH lookup. */
+static void seal_chattr_flag(const char *path, const char *flag) {
     pid_t pid = fork();
     if (pid == 0) {
         int devnull = open("/dev/null", O_WRONLY);
@@ -292,7 +292,7 @@ static void seal_chattr_immutable(const char *path) {
             dup2(devnull, STDERR_FILENO);
             close(devnull);
         }
-        char *const args[] = { "chattr", "+i", (char *)path, NULL };
+        char *const args[] = { "chattr", (char *)flag, (char *)path, NULL };
         execv("/usr/bin/chattr", args);
         _exit(127);
     }
@@ -301,6 +301,14 @@ static void seal_chattr_immutable(const char *path) {
         while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
             ;
     }
+}
+
+static void seal_chattr_immutable(const char *path) {
+    seal_chattr_flag(path, "+i");
+}
+
+static void seal_chattr_mutable(const char *path) {
+    seal_chattr_flag(path, "-i");
 }
 #endif
 
@@ -456,33 +464,35 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
         fprintf(stderr, "seal: cannot amend — verification failed: %s\n", file_path);
         return -1;
     }
-    fchmod(fd, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+
+    mode_t original_mode = st.st_mode & 07777;
+    int afd = -1;
+    FILE *f = NULL;
+    int made_writable = 0;
+
+#ifdef __linux__
+    seal_chattr_mutable(canon);
+#endif
+
+    if (fchmod(fd, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH) != 0)
+        goto amend_fail;
+    made_writable = 1;
 
     /* Append amendment */
-    int afd = openat(dirfd, leaf, O_WRONLY | O_APPEND | O_NOFOLLOW | O_CLOEXEC);
+    afd = openat(dirfd, leaf, O_WRONLY | O_APPEND | O_NOFOLLOW | O_CLOEXEC);
     if (afd < 0) {
-        fprintf(stderr, "seal: cannot open for amendment: %s\n", file_path);
-        close(fd);
-        close(dirfd);
-        return -1;
+        goto amend_fail;
     }
     struct stat ast;
     if (fstat(afd, &ast) != 0 || !S_ISREG(ast.st_mode) ||
         ast.st_dev != st.st_dev || ast.st_ino != st.st_ino) {
-        close(afd);
-        close(fd);
-        close(dirfd);
-        fprintf(stderr, "seal: cannot open for amendment: %s\n", file_path);
-        return -1;
+        goto amend_fail;
     }
-    FILE *f = fdopen(afd, "a");
+    f = fdopen(afd, "a");
     if (!f) {
-        close(afd);
-        close(fd);
-        close(dirfd);
-        fprintf(stderr, "seal: cannot open for amendment: %s\n", file_path);
-        return -1;
+        goto amend_fail;
     }
+    afd = -1;
 
     time_t now = time(NULL);
     struct tm tm_buf;
@@ -497,6 +507,7 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     fprintf(f, "\n\n%s\n", amendment);
 
     fclose(f);
+    f = NULL;
     close(fd);
 
     /* Make seal marker writable, then re-seal */
@@ -507,4 +518,19 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     close(dirfd);
 
     return lst_seal(file_path);
+
+amend_fail:
+    if (f)
+        fclose(f);
+    else if (afd >= 0)
+        close(afd);
+    if (made_writable)
+        fchmod(fd, original_mode);
+#ifdef __linux__
+    seal_chattr_immutable(canon);
+#endif
+    close(fd);
+    close(dirfd);
+    fprintf(stderr, "seal: cannot open for amendment: %s\n", file_path);
+    return -1;
 }
