@@ -142,8 +142,7 @@ static int seal_write_marker_at(int dirfd, const char *leaf, const char *file_pa
         fprintf(f, "Dev: %llu\n", (unsigned long long)st->st_dev) < 0 ||
         fprintf(f, "Inode: %llu\n", (unsigned long long)st->st_ino) < 0 ||
         fprintf(f, "Status: IMMUTABLE\n") < 0 ||
-        fflush(f) != 0 ||
-        fchmod(fileno(f), S_IRUSR | S_IRGRP | S_IROTH) != 0) {
+        fflush(f) != 0) {
         fclose(f);
         unlinkat(dirfd, marker, 0);
         return -1;
@@ -407,10 +406,19 @@ int lst_seal(const char *file_path) {
         close(dirfd);
         return -1;
     }
+    char marker[LST_MAX_PATH];
+    if (seal_marker_path(marker, sizeof(marker), leaf) != 0 ||
+        seal_fchmod_at(dirfd, marker, S_IRUSR | S_IRGRP | S_IROTH) != 0) {
+        if (seal_marker_path(marker, sizeof(marker), leaf) == 0)
+            unlinkat(dirfd, marker, 0);
+        fprintf(stderr, "seal: cannot write marker: %s.sealed\n", canon);
+        close(fd);
+        close(dirfd);
+        return -1;
+    }
 
     /* Set read-only: 444 (fd-based; no path re-lookup) */
     if (fchmod(fd, S_IRUSR | S_IRGRP | S_IROTH) != 0) {
-        char marker[LST_MAX_PATH];
         if (seal_marker_path(marker, sizeof(marker), leaf) == 0)
             unlinkat(dirfd, marker, 0);
         fprintf(stderr, "seal: cannot seal: %s\n", file_path);
@@ -566,6 +574,8 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode))
         goto amend_fail;
     if (seal_write_marker_at(dirfd, leaf, file_path, &st) != 0)
+        goto amend_fail;
+    if (seal_fchmod_at(dirfd, marker, S_IRUSR | S_IRGRP | S_IROTH) != 0)
         goto amend_fail;
     marker_writable = 0;
     if (fchmod(fd, S_IRUSR | S_IRGRP | S_IROTH) != 0)
