@@ -68,7 +68,7 @@ static void scopy(char *dst, const char *src, size_t maxlen) {
 static void strim(char *s) {
     char *start = s;
     while (*start && isspace((unsigned char)*start)) start++;
-    if (start != s) memmove(s, start, strlen(s) + 1);
+    if (start != s) memmove(s, start, strlen(start) + 1);
     size_t len = strlen(s);
     while (len > 0 && isspace((unsigned char)s[len - 1])) s[--len] = '\0';
 }
@@ -164,6 +164,7 @@ static int json_get_string(const char *json, const char *key, char *dst, size_t 
 static int json_get_license(const char *json, char *dst, size_t maxlen) {
     dst[0] = '\0';
     const char *p = strstr(json, "\"license\"");
+    int found = 0;
     if (!p) return 0;
     p += 9; /* strlen("\"license\"") */
     while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == ':')) p++;
@@ -173,8 +174,10 @@ static int json_get_license(const char *json, char *dst, size_t maxlen) {
         p++;
         size_t i = 0;
         while (*p && *p != '"' && i < maxlen - 1) dst[i++] = *p++;
-    }
-    if (*p == '[') {
+        dst[i] = '\0';
+        if (*p == '"') p++;
+        found = 1;
+    } else if (*p == '[') {
         /* Array — join with " OR " */
         size_t off = 0;
         int first = 1;
@@ -192,9 +195,10 @@ static int json_get_license(const char *json, char *dst, size_t maxlen) {
             }
         }
         dst[off] = '\0';
-        return 1;
+        if (*p == ']') p++;
+        found = 1;
     }
-    return 0;
+    return found;
 }
 
 /* Map license string to license_t enum */
@@ -347,11 +351,35 @@ lst_artifact_t *lst_create(const char *project_path) {
     art->version = 1;
     art->built_at = time(NULL);
 
-    scopy(art->project_path, project_path, LST_MAX_PATH);
+    /* Store the canonical project path so recipe scanners that join
+     * art->project_path with readdir() names never feed lst_secure_fopen()
+     * a spelling that still contains ".." (which it rejects). Falls back
+     * to the raw spelling if the path cannot be resolved. */
+    char *rp = realpath(project_path, NULL);
+    const char *base = rp ? rp : project_path;
+    scopy(art->project_path, base, LST_MAX_PATH);
 
-    /* Extract project name from path */
-    const char *name = strrchr(project_path, '/');
-    scopy(art->project_name, name ? name + 1 : project_path, LST_MAX_NAME);
+    /* Extract project name from the (canonical) path's basename, so raw
+     * spellings like "." or "dir/" still yield a usable, store-safe name. */
+    const char *name = base;
+    size_t base_len = strlen(base);
+    while (base_len > 1 && base[base_len - 1] == '/')
+        base_len--;
+    for (size_t i = base_len; i > 0; i--) {
+        if (base[i - 1] == '/') {
+            name = base + i;
+            break;
+        }
+    }
+    if (base_len == 1 && base[0] == '/') {
+        scopy(art->project_name, "root", LST_MAX_NAME);
+    } else {
+        size_t name_len = base_len - (size_t)(name - base);
+        if (name_len >= LST_MAX_NAME) name_len = LST_MAX_NAME - 1;
+        memcpy(art->project_name, name, name_len);
+        art->project_name[name_len] = '\0';
+    }
+    free(rp);
 
     return art;
 }

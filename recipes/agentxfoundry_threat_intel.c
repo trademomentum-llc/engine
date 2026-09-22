@@ -93,7 +93,7 @@ static const char *RANK_HIERARCHY[] = {
  * -------------------------------------------------------------------------- */
 
 static char *read_file_ti(const char *path, size_t *out_len) {
-    FILE *f = fopen(path, "rb");
+    FILE *f = lst_secure_fopen(path, "rb");
     if (!f) return NULL;
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
