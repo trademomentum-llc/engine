@@ -427,15 +427,10 @@ int lst_seal(const char *file_path) {
         return -1;
     }
 
-    /* On Linux, try FS_IOC_SETFLAGS on the held descriptor. */
+    /* On Linux, try FS_IOC_SETFLAGS on the held descriptor as a best-effort
+     * hardening step. */
 #ifdef __linux__
-    if (seal_set_immutable_fd(fd, 1) != 0) {
-        unlinkat(dirfd, marker, 0);
-        fprintf(stderr, "seal: cannot seal: %s\n", file_path);
-        close(fd);
-        close(dirfd);
-        return -1;
-    }
+    (void)seal_set_immutable_fd(fd, 1);
 #endif
     close(fd);
     close(dirfd);
