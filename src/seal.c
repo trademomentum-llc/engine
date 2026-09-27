@@ -82,25 +82,6 @@ static int seal_canonicalize(const char *path, char *dst, size_t maxlen) {
     return 0;
 }
 
-static int seal_marker_matches_fd_at(int dirfd, const char *path, int fd) {
-    struct stat fd_st;
-    struct stat path_st;
-    if (fstat(fd, &fd_st) != 0)
-        return 0;
-    if (!S_ISREG(fd_st.st_mode))
-        return 0;
-    if (fstatat(dirfd, path, &path_st, AT_SYMLINK_NOFOLLOW) != 0)
-        return 0;
-    if (!S_ISREG(path_st.st_mode))
-        return 0;
-    return fd_st.st_dev == path_st.st_dev && fd_st.st_ino == path_st.st_ino;
-}
-
-static void seal_unlink_marker_if_same_at(int dirfd, const char *path, int fd) {
-    if (seal_marker_matches_fd_at(dirfd, path, fd))
-        (void)unlinkat(dirfd, path, 0);
-}
-
 static int seal_write_marker_at(int dirfd, const char *leaf, const char *file_path,
                                 const struct stat *st, int *marker_fd_out) {
     char marker[LST_MAX_PATH];
@@ -123,7 +104,6 @@ static int seal_write_marker_at(int dirfd, const char *leaf, const char *file_pa
     int stream_fd = dup(fd);
     if (stream_fd < 0) {
         int saved_errno = errno;
-        seal_unlink_marker_if_same_at(dirfd, marker, fd);
         close(fd);
         errno = saved_errno;
         return -1;
@@ -132,7 +112,6 @@ static int seal_write_marker_at(int dirfd, const char *leaf, const char *file_pa
     FILE *f = seal_marker_stream(stream_fd, "w", 1);
     if (!f) {
         int saved_errno = errno;
-        seal_unlink_marker_if_same_at(dirfd, marker, fd);
         close(fd);
         errno = saved_errno;
         return -1;
@@ -141,7 +120,6 @@ static int seal_write_marker_at(int dirfd, const char *leaf, const char *file_pa
     if (seal_write_marker_stream(f, file_path, st) != 0) {
         int saved_errno = errno;
         fclose(f);
-        seal_unlink_marker_if_same_at(dirfd, marker, fd);
         close(fd);
         errno = saved_errno;
         return -1;
@@ -149,7 +127,6 @@ static int seal_write_marker_at(int dirfd, const char *leaf, const char *file_pa
 
     if (fclose(f) != 0) {
         int saved_errno = errno;
-        seal_unlink_marker_if_same_at(dirfd, marker, fd);
         close(fd);
         errno = saved_errno;
         return -1;
@@ -503,8 +480,6 @@ int lst_seal(const char *file_path) {
     }
     if (seal_marker_path(marker, sizeof(marker), leaf) != 0 ||
         fchmod(marker_fd, S_IRUSR | S_IRGRP | S_IROTH) != 0) {
-        if (seal_marker_path(marker, sizeof(marker), leaf) == 0)
-            seal_unlink_marker_if_same_at(dirfd, marker, marker_fd);
         fprintf(stderr, "seal: cannot write marker: %s.sealed\n", canon);
         close(marker_fd);
         close(fd);
@@ -513,8 +488,6 @@ int lst_seal(const char *file_path) {
     }
     /* Set read-only: 444 (fd-based; no path re-lookup) */
     if (fchmod(fd, S_IRUSR | S_IRGRP | S_IROTH) != 0) {
-        if (seal_marker_path(marker, sizeof(marker), leaf) == 0)
-            seal_unlink_marker_if_same_at(dirfd, marker, marker_fd);
         fprintf(stderr, "seal: cannot seal: %s\n", file_path);
         close(marker_fd);
         close(fd);
@@ -620,7 +593,6 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     int marker_fd = -1;
     int restore_immutable = 0;
     int amendment_appended = 0;
-    int marker_created = 0;
     int marker_dirty = 0;
 
 #ifdef __linux__
@@ -658,18 +630,27 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     char timestamp[64];
     strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", t);
 
-    fprintf(f, "\n");
-    for (int i = 0; i < 80; i++) fputc('=', f);
-    fprintf(f, "\nAMENDMENT — %s\n", timestamp);
-    for (int i = 0; i < 80; i++) fputc('=', f);
-    fprintf(f, "\n\n%s\n", amendment);
+    amendment_appended = 1;
+    if (fprintf(f, "\n") < 0)
+        goto amend_fail;
+    for (int i = 0; i < 80; i++) {
+        if (fputc('=', f) == EOF)
+            goto amend_fail;
+    }
+    if (fprintf(f, "\nAMENDMENT — %s\n", timestamp) < 0)
+        goto amend_fail;
+    for (int i = 0; i < 80; i++) {
+        if (fputc('=', f) == EOF)
+            goto amend_fail;
+    }
+    if (fprintf(f, "\n\n%s\n", amendment) < 0 || fflush(f) != 0 || ferror(f))
+        goto amend_fail;
 
     if (fclose(f) != 0) {
         f = NULL;
         goto amend_fail;
     }
     f = NULL;
-    amendment_appended = 1;
 
     /* Make seal marker writable, then re-seal */
     if (seal_marker_path(marker, sizeof(marker), leaf) != 0)
@@ -721,7 +702,6 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     } else {
         if (seal_write_marker_at(dirfd, leaf, file_path, &st, &marker_fd) != 0)
             goto amend_fail;
-        marker_created = 1;
         if (fchmod(marker_fd, S_IRUSR | S_IRGRP | S_IROTH) != 0)
             goto amend_fail;
     }
@@ -754,8 +734,6 @@ amend_fail:
         if (marker_backup_len > 0 && lseek(marker_fd, 0, SEEK_SET) >= 0)
             (void)seal_write_full(marker_fd, marker_backup, marker_backup_len);
     }
-    if (marker_fd >= 0 && marker_created)
-        seal_unlink_marker_if_same_at(dirfd, marker, marker_fd);
     if (marker_fd >= 0)
         close(marker_fd);
     if (marker_writable && marker_restore_fd >= 0) {
