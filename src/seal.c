@@ -745,13 +745,13 @@ amend_fail:
         fclose(f);
     else if (afd >= 0)
         close(afd);
-    if (amendment_appended) {
+    if (amendment_appended && fd >= 0) {
         (void)!ftruncate(fd, original_size);
         (void)lseek(fd, original_size, SEEK_SET);
     }
     if (marker_fd >= 0 && marker_dirty && marker_restore_fd >= 0) {
         (void)!ftruncate(marker_fd, 0);
-        if (lseek(marker_fd, 0, SEEK_SET) >= 0 && marker_backup)
+        if (marker_backup_len > 0 && lseek(marker_fd, 0, SEEK_SET) >= 0)
             (void)seal_write_full(marker_fd, marker_backup, marker_backup_len);
     }
     if (marker_fd >= 0 && marker_created)
