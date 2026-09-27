@@ -592,7 +592,7 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     int marker_restore_fd = -1;
     int marker_fd = -1;
     int restore_immutable = 0;
-    int amendment_appended = 0;
+    int amendment_attempted = 0;
     int marker_dirty = 0;
 
 #ifdef __linux__
@@ -630,7 +630,7 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     char timestamp[64];
     strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", t);
 
-    amendment_appended = 1;
+    amendment_attempted = 1;
     if (fprintf(f, "\n") < 0)
         goto amend_fail;
     for (int i = 0; i < 80; i++) {
@@ -725,9 +725,12 @@ amend_fail:
         fclose(f);
     else if (afd >= 0)
         close(afd);
-    if (amendment_appended && fd >= 0) {
-        (void)!ftruncate(fd, original_size);
-        (void)lseek(fd, original_size, SEEK_SET);
+    if (amendment_attempted && fd >= 0) {
+        struct stat current_st;
+        if (fstat(fd, &current_st) != 0 || current_st.st_size != original_size) {
+            (void)!ftruncate(fd, original_size);
+            (void)lseek(fd, original_size, SEEK_SET);
+        }
     }
     if (marker_fd >= 0 && marker_dirty && marker_restore_fd >= 0) {
         (void)!ftruncate(marker_fd, 0);
