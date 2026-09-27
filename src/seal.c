@@ -727,7 +727,7 @@ amend_fail:
         close(afd);
     if (amendment_attempted && fd >= 0) {
         struct stat current_st;
-        if (fstat(fd, &current_st) != 0 || current_st.st_size != original_size) {
+        if (fstat(fd, &current_st) == 0 && current_st.st_size > original_size) {
             (void)!ftruncate(fd, original_size);
             (void)lseek(fd, original_size, SEEK_SET);
         }
