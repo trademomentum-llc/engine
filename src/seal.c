@@ -620,6 +620,7 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     int marker_fd = -1;
     int restore_immutable = 0;
     int amendment_appended = 0;
+    int marker_created = 0;
     int marker_dirty = 0;
 
 #ifdef __linux__
@@ -674,7 +675,7 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     if (seal_marker_path(marker, sizeof(marker), leaf) != 0)
         goto amend_fail;
     marker_restore_fd = openat(dirfd, marker, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
-    if (marker_restore_fd < 0)
+    if (marker_restore_fd < 0 && errno != ENOENT)
         goto amend_fail;
     if (marker_restore_fd >= 0) {
         struct stat marker_st;
@@ -698,24 +699,32 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     }
     if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode))
         goto amend_fail;
-    marker_fd = openat(dirfd, marker, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
-    if (marker_fd < 0)
-        goto amend_fail;
-    {
-        struct stat writer_st;
-        struct stat restore_st;
-        if (fstat(marker_fd, &writer_st) != 0 ||
-            fstat(marker_restore_fd, &restore_st) != 0 ||
-            !S_ISREG(writer_st.st_mode) ||
-            writer_st.st_dev != restore_st.st_dev ||
-            writer_st.st_ino != restore_st.st_ino)
+    if (marker_restore_fd >= 0) {
+        marker_fd = openat(dirfd, marker, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
+        if (marker_fd < 0)
+            goto amend_fail;
+        {
+            struct stat writer_st;
+            struct stat restore_st;
+            if (fstat(marker_fd, &writer_st) != 0 ||
+                fstat(marker_restore_fd, &restore_st) != 0 ||
+                !S_ISREG(writer_st.st_mode) ||
+                writer_st.st_dev != restore_st.st_dev ||
+                writer_st.st_ino != restore_st.st_ino)
+                goto amend_fail;
+        }
+        if (seal_rewrite_marker_fd(marker_fd, file_path, &st, &marker_dirty) != 0)
+            goto amend_fail;
+        if (fchmod(marker_restore_fd, S_IRUSR | S_IRGRP | S_IROTH) != 0)
+            goto amend_fail;
+        marker_writable = 0;
+    } else {
+        if (seal_write_marker_at(dirfd, leaf, file_path, &st, &marker_fd) != 0)
+            goto amend_fail;
+        marker_created = 1;
+        if (fchmod(marker_fd, S_IRUSR | S_IRGRP | S_IROTH) != 0)
             goto amend_fail;
     }
-    if (seal_rewrite_marker_fd(marker_fd, file_path, &st, &marker_dirty) != 0)
-        goto amend_fail;
-    if (fchmod(marker_restore_fd, S_IRUSR | S_IRGRP | S_IROTH) != 0)
-        goto amend_fail;
-    marker_writable = 0;
     if (fchmod(fd, S_IRUSR | S_IRGRP | S_IROTH) != 0)
         goto amend_fail;
 #ifdef __linux__
@@ -738,11 +747,13 @@ amend_fail:
         close(afd);
     if (amendment_appended)
         (void)!ftruncate(fd, original_size);
-    if (marker_fd >= 0 && marker_dirty) {
+    if (marker_fd >= 0 && marker_dirty && marker_restore_fd >= 0) {
         (void)!ftruncate(marker_fd, 0);
         if (lseek(marker_fd, 0, SEEK_SET) >= 0 && marker_backup)
             (void)seal_write_full(marker_fd, marker_backup, marker_backup_len);
     }
+    if (marker_fd >= 0 && marker_created)
+        seal_unlink_marker_if_same_at(dirfd, marker, marker_fd);
     if (marker_fd >= 0)
         close(marker_fd);
     if (marker_writable && marker_restore_fd >= 0) {
