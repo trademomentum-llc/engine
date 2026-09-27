@@ -593,6 +593,7 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     int marker_fd = -1;
     int restore_immutable = 0;
     int amendment_attempted = 0;
+    int amendment_is_append = 0;
     int marker_dirty = 0;
 
 #ifdef __linux__
@@ -613,6 +614,7 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     if (afd < 0) {
         goto amend_fail;
     }
+    amendment_is_append = 1;
     struct stat ast;
     if (fstat(afd, &ast) != 0 || !S_ISREG(ast.st_mode) ||
         ast.st_dev != st.st_dev || ast.st_ino != st.st_ino) {
@@ -727,7 +729,9 @@ amend_fail:
         close(afd);
     if (amendment_attempted && fd >= 0) {
         struct stat current_st;
-        if (fstat(fd, &current_st) == 0 && current_st.st_size > original_size) {
+        if (fstat(fd, &current_st) == 0 &&
+            ((amendment_is_append && current_st.st_size > original_size) ||
+             (!amendment_is_append && current_st.st_size != original_size))) {
             (void)!ftruncate(fd, original_size);
             (void)lseek(fd, original_size, SEEK_SET);
         }
