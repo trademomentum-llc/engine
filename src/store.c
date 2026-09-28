@@ -116,9 +116,9 @@ int lst_store_write(const lst_artifact_t *art, const char *store_dir) {
     }
 
     size_t written = fwrite(art, sizeof(lst_artifact_t), 1, f);
-    fclose(f);
+    int close_rc = fclose(f);
 
-    if (written != 1) {
+    if (written != 1 || close_rc != 0) {
         fprintf(stderr, "store: incomplete write to %s/%s\n", store_dir, path);
         return -1;
     }
@@ -139,9 +139,15 @@ lst_artifact_t *lst_store_read(const char *store_dir, const char *project_name) 
         return NULL;
     }
 
-    int fd = openat(dirfd, path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    int fd = openat(dirfd, path, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
     close(dirfd);
     if (fd < 0) return NULL;
+    struct stat st;
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) ||
+        st.st_size != (off_t)sizeof(lst_artifact_t)) {
+        close(fd);
+        return NULL;
+    }
     FILE *f = fdopen(fd, "rb");
     if (!f) { close(fd); return NULL; }
 

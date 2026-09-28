@@ -581,6 +581,7 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
 
     mode_t original_mode = st.st_mode & 07777;
     off_t original_size = st.st_size;
+    struct timespec original_times[2] = {st.st_atim, st.st_mtim};
     char marker[LST_MAX_PATH];
     int afd = -1;
     FILE *f = NULL;
@@ -723,40 +724,47 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     return 0;
 
 amend_fail:
-    if (f)
-        fclose(f);
-    else if (afd >= 0)
+    ;
+    int recovery_failed = 0;
+    if (f) {
+        if (fclose(f) != 0) recovery_failed = 1;
+    } else if (afd >= 0) {
         close(afd);
+    }
     if (amendment_attempted && fd >= 0) {
         struct stat current_st;
         if (fstat(fd, &current_st) == 0 &&
             ((amendment_is_append && current_st.st_size > original_size) ||
              (!amendment_is_append && current_st.st_size != original_size))) {
-            (void)!ftruncate(fd, original_size);
-            (void)lseek(fd, original_size, SEEK_SET);
+            if (ftruncate(fd, original_size) != 0) recovery_failed = 1;
         }
+        if (futimens(fd, original_times) != 0) recovery_failed = 1;
     }
     if (marker_fd >= 0 && marker_dirty && marker_restore_fd >= 0) {
-        (void)!ftruncate(marker_fd, 0);
-        if (marker_backup_len > 0 && lseek(marker_fd, 0, SEEK_SET) >= 0)
-            (void)seal_write_full(marker_fd, marker_backup, marker_backup_len);
+        if (ftruncate(marker_fd, 0) != 0 || lseek(marker_fd, 0, SEEK_SET) < 0 ||
+            (marker_backup_len > 0 &&
+             seal_write_full(marker_fd, marker_backup, marker_backup_len) != 0))
+            recovery_failed = 1;
     }
     if (marker_fd >= 0)
         close(marker_fd);
     if (marker_writable && marker_restore_fd >= 0) {
-        (void)fchmod(marker_restore_fd, marker_mode ? marker_mode : (S_IRUSR | S_IRGRP | S_IROTH));
+        if (fchmod(marker_restore_fd, marker_mode) != 0) recovery_failed = 1;
     }
     if (marker_restore_fd >= 0)
         close(marker_restore_fd);
     free(marker_backup);
+    if (made_writable) {
+        if (fchmod(fd, original_mode) != 0) recovery_failed = 1;
+    }
 #ifdef __linux__
-    if (restore_immutable)
-        (void)seal_set_immutable_fd(fd, 1);
+    if (restore_immutable && seal_set_immutable_fd(fd, 1) != 0)
+        recovery_failed = 1;
 #endif
-    if (made_writable)
-        fchmod(fd, original_mode);
     close(fd);
     close(dirfd);
     fprintf(stderr, "seal: cannot amend: %s\n", file_path);
+    if (recovery_failed)
+        fprintf(stderr, "seal: amendment recovery incomplete: %s\n", file_path);
     return -1;
 }
