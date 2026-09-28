@@ -11,6 +11,7 @@
 
 #include "lst.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,11 +23,41 @@
 /* Artifact file extension */
 #define LST_EXT ".lst"
 
-/* Build the store path for a given project name.
- * Returns 0 on success, -1 if project_name is unsafe, -2 if store_dir
- * cannot be canonicalized, -3 if the composed path would not fit
- * (no silent truncation). */
-static int store_path(char *dst, size_t maxlen, const char *store_dir, const char *project_name) {
+static int open_store_dir_fd(const char *store_dir, int create_if_missing, int require_private) {
+    if (create_if_missing &&
+        mkdir(store_dir, 0700) != 0 && errno != EEXIST) {
+        fprintf(stderr, "store: cannot create store directory: %s\n", store_dir);
+        return -1;
+    }
+
+    int dirfd = open(store_dir, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (dirfd < 0) {
+        fprintf(stderr, "store: cannot access store directory: %s\n", store_dir);
+        return -1;
+    }
+
+    struct stat st;
+    if (fstat(dirfd, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        fprintf(stderr, "store: cannot access store directory: %s\n", store_dir);
+        close(dirfd);
+        return -1;
+    }
+
+    if (require_private && (st.st_mode & 07777) != 0700) {
+        if (fchmod(dirfd, 0700) != 0) {
+            fprintf(stderr, "store: store directory must be private (0700): %s\n", store_dir);
+            close(dirfd);
+            return -1;
+        }
+    }
+
+    return dirfd;
+}
+
+/* Build the store leaf name for a given project name.
+ * Returns 0 on success, -1 if project_name is unsafe, -3 if the composed
+ * filename would not fit (no silent truncation). */
+static int store_path(char *dst, size_t maxlen, const char *project_name) {
     /* Reject traversal and hostile names outright */
     if (!project_name || !project_name[0]) return -1;
     if (project_name[0] == '.') return -1;              /* ".", "..", hidden   */
@@ -44,18 +75,7 @@ static int store_path(char *dst, size_t maxlen, const char *store_dir, const cha
     }
     safe_name[i] = '\0';
 
-    /* Canonicalize store_dir: realpath() resolves ".." and follows symlinks
-     * at every level of the directory tree, so canon_dir is the store's real
-     * location — which can be outside the path spelling the caller passed.
-     * dst is composed as <canon_dir>/<safe_name>.lst where safe_name is a
-     * single validated component (no separators, no ".."), so the composed
-     * path resolves inside canon_dir. Confinement holds relative to the
-     * canonical store directory only; open() adds O_NOFOLLOW to reject a
-     * symlink at the final resolved component. */
-    char *canon_dir = realpath(store_dir, NULL);
-    if (!canon_dir) return -2;
-    int n = snprintf(dst, maxlen, "%s/%s%s", canon_dir, safe_name, LST_EXT);
-    free(canon_dir);
+    int n = snprintf(dst, maxlen, "%s%s", safe_name, LST_EXT);
     if (n < 0 || (size_t)n >= maxlen) return -3;
     return 0;
 }
@@ -63,46 +83,43 @@ static int store_path(char *dst, size_t maxlen, const char *store_dir, const cha
 int lst_store_write(const lst_artifact_t *art, const char *store_dir) {
     if (!art || !store_dir) return -1;
 
-    /* Ensure store directory exists */
-    mkdir(store_dir, 0755);
+    /* Ensure store directory exists and is private even if it predates the
+     * 0700 hardening. */
+    int dirfd = open_store_dir_fd(store_dir, 1, 1);
+    if (dirfd < 0)
+        return -1;
 
     char path[LST_MAX_PATH];
-    int prc = store_path(path, sizeof(path), store_dir, art->project_name);
+    int prc = store_path(path, sizeof(path), art->project_name);
     if (prc == -1) {
         fprintf(stderr, "store: unsafe project name: %s\n", art->project_name);
-        return -1;
-    }
-    if (prc == -2) {
-        /* Report the failing input, not a composed path — no valid
-         * on-disk path exists to print. */
-        fprintf(stderr, "store: cannot canonicalize store directory: %s\n", store_dir);
+        close(dirfd);
         return -1;
     }
     if (prc != 0) {
-        /* -3: the real (canonical) directory plus sanitized name would
-         * overflow LST_MAX_PATH. Report the store directory as context;
-         * the composed path was never materialized. */
         fprintf(stderr, "store: composed path too long under store directory: %s\n", store_dir);
+        close(dirfd);
         return -1;
     }
 
-    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);
+    int fd = openat(dirfd, path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);
+    close(dirfd);
     if (fd < 0) {
-        fprintf(stderr, "store: cannot write %s\n", path);
+        fprintf(stderr, "store: cannot write %s/%s\n", store_dir, path);
         return -1;
     }
     FILE *f = fdopen(fd, "wb");
     if (!f) {
         close(fd);
-        fprintf(stderr, "store: cannot write %s\n", path);
+        fprintf(stderr, "store: cannot write %s/%s\n", store_dir, path);
         return -1;
     }
 
     size_t written = fwrite(art, sizeof(lst_artifact_t), 1, f);
-    fclose(f);
+    int close_rc = fclose(f);
 
-    if (written != 1) {
-        fprintf(stderr, "store: incomplete write to %s\n", path);
+    if (written != 1 || close_rc != 0) {
+        fprintf(stderr, "store: incomplete write to %s/%s\n", store_dir, path);
         return -1;
     }
 
@@ -112,12 +129,25 @@ int lst_store_write(const lst_artifact_t *art, const char *store_dir) {
 lst_artifact_t *lst_store_read(const char *store_dir, const char *project_name) {
     if (!store_dir || !project_name) return NULL;
 
-    char path[LST_MAX_PATH];
-    if (store_path(path, sizeof(path), store_dir, project_name) != 0)
+    int dirfd = open_store_dir_fd(store_dir, 0, 0);
+    if (dirfd < 0)
         return NULL;
 
-    int fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    char path[LST_MAX_PATH];
+    if (store_path(path, sizeof(path), project_name) != 0) {
+        close(dirfd);
+        return NULL;
+    }
+
+    int fd = openat(dirfd, path, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
+    close(dirfd);
     if (fd < 0) return NULL;
+    struct stat st;
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) ||
+        st.st_size != (off_t)sizeof(lst_artifact_t)) {
+        close(fd);
+        return NULL;
+    }
     FILE *f = fdopen(fd, "rb");
     if (!f) { close(fd); return NULL; }
 
@@ -136,12 +166,22 @@ lst_artifact_t *lst_store_read(const char *store_dir, const char *project_name) 
 }
 
 int lst_store_is_current(const char *store_dir, const char *project_name) {
-    char path[LST_MAX_PATH];
-    if (store_path(path, sizeof(path), store_dir, project_name) != 0)
+    int dirfd = open_store_dir_fd(store_dir, 0, 0);
+    if (dirfd < 0)
         return 0;
 
+    char path[LST_MAX_PATH];
+    if (store_path(path, sizeof(path), project_name) != 0) {
+        close(dirfd);
+        return 0;
+    }
+
     struct stat st;
-    if (stat(path, &st) != 0) return 0; /* doesn't exist */
+    if (fstatat(dirfd, path, &st, AT_SYMLINK_NOFOLLOW) != 0 || !S_ISREG(st.st_mode)) {
+        close(dirfd);
+        return 0; /* doesn't exist or is not a regular file */
+    }
+    close(dirfd);
 
     /* Current if stored within last hour — recipes can force rebuild */
     time_t now = time(NULL);
@@ -149,8 +189,14 @@ int lst_store_is_current(const char *store_dir, const char *project_name) {
 }
 
 int lst_store_list(const char *store_dir, char names[][LST_MAX_NAME], int max) {
-    DIR *d = opendir(store_dir);
-    if (!d) return 0;
+    int dirfd = open_store_dir_fd(store_dir, 0, 0);
+    if (dirfd < 0) return 0;
+
+    DIR *d = fdopendir(dirfd);
+    if (!d) {
+        close(dirfd);
+        return 0;
+    }
 
     int count = 0;
     struct dirent *ent;
