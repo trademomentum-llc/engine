@@ -15,6 +15,7 @@
 | Telemetry | `make -C telemetry test` | Passes, 7 cases |
 | Python | `PYTHONPATH=nnos python3 -m unittest nnos.neurobalance.test_coordinator_efficiency` | Passes, 7 cases |
 | NNOS CMake | `cmake -S nnos -B build` | Blocked locally: CMake unavailable |
+| C static analysis | `cc -std=c11 -I include -Wall -Wextra -fanalyzer -fsyntax-only src/*.c recipes/*.c` | Passes after declaring `qsort` via `<stdlib.h>` |
 | Hosted OSSAR | GitHub PR workflow | Pending external result |
 
 ## Appendix A. Go/no-go
