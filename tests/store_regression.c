@@ -25,6 +25,8 @@ int main(void) {
     assert(unlink(path) == 0);
     assert(mkfifo(path, 0600) == 0);
     assert(lst_store_read(dir, "sample") == NULL);
+    /* Write must reject a FIFO leaf promptly instead of blocking. */
+    assert(lst_store_write(art, dir) == -1);
     assert(unlink(path) == 0);
     assert(symlink("/etc/passwd", path) == 0);
     assert(lst_store_read(dir, "sample") == NULL);

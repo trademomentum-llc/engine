@@ -102,10 +102,22 @@ int lst_store_write(const lst_artifact_t *art, const char *store_dir) {
         return -1;
     }
 
-    int fd = openat(dirfd, path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);
+    /* O_NONBLOCK: an existing leaf replaced by a FIFO fails with ENXIO
+     * instead of blocking for a reader; anything else non-regular is
+     * rejected by the fstat check before it is wrapped in a FILE *. */
+    int fd = openat(dirfd, path,
+                    O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0600);
     close(dirfd);
     if (fd < 0) {
         fprintf(stderr, "store: cannot write %s/%s\n", store_dir, path);
+        return -1;
+    }
+    struct stat leaf_st;
+    int fl = -1;
+    if (fstat(fd, &leaf_st) != 0 || !S_ISREG(leaf_st.st_mode) ||
+        (fl = fcntl(fd, F_GETFL)) < 0 || fcntl(fd, F_SETFL, fl & ~O_NONBLOCK) != 0) {
+        close(fd);
+        fprintf(stderr, "store: refusing non-regular store file %s/%s\n", store_dir, path);
         return -1;
     }
     FILE *f = fdopen(fd, "wb");
