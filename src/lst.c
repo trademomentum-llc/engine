@@ -357,6 +357,13 @@ lst_artifact_t *lst_create(const char *project_path) {
      * to the raw spelling if the path cannot be resolved. */
     char *rp = realpath(project_path, NULL);
     const char *base = rp ? rp : project_path;
+    /* Refuse rather than truncate: a silently shortened path would point the
+     * scanners and recipes at a different (or nonexistent) directory. */
+    if (strlen(base) >= LST_MAX_PATH) {
+        free(rp);
+        free(art);
+        return NULL;
+    }
     scopy(art->project_path, base, LST_MAX_PATH);
 
     /* Extract project name from the (canonical) path's basename, so raw
