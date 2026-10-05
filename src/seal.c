@@ -26,6 +26,10 @@
 
 #define _XOPEN_SOURCE 700
 #define _POSIX_C_SOURCE 200809L
+#if defined(__APPLE__)
+/* Expose struct stat's st_atimespec/st_mtimespec alongside POSIX names. */
+#define _DARWIN_C_SOURCE
+#endif
 
 #include "lst.h"
 
@@ -49,6 +53,20 @@
  * In production, link against a real SHA-256 (CommonCrypto on macOS, openssl). */
 
 #define SEAL_MARKER_EXT ".sealed"
+
+/* A marker is a handful of short lines plus one path (<= LST_MAX_PATH).
+ * Anything larger is forged or corrupt and is never buffered in memory. */
+#define SEAL_MARKER_MAX_BYTES ((size_t)(LST_MAX_PATH + 1024))
+
+/* Access/modification timestamps as struct timespec. macOS names these
+ * st_atimespec/st_mtimespec; POSIX.1-2008 (Linux, BSDs) uses st_atim. */
+#if defined(__APPLE__)
+#define SEAL_ST_ATIM(st) ((st).st_atimespec)
+#define SEAL_ST_MTIM(st) ((st).st_mtimespec)
+#else
+#define SEAL_ST_ATIM(st) ((st).st_atim)
+#define SEAL_ST_MTIM(st) ((st).st_mtim)
+#endif
 
 static FILE *seal_marker_stream(int fd, const char *mode, int require_regular);
 static int seal_write_marker_stream(FILE *f, const char *file_path, const struct stat *st);
@@ -134,6 +152,17 @@ static int seal_write_marker_at(int dirfd, const char *leaf, const char *file_pa
 
     *marker_fd_out = fd;
     return 0;
+}
+
+/* Roll back a marker written by an incomplete seal. Truncation goes through
+ * the marker's own O_RDWR descriptor (its access mode is unaffected by a
+ * later fchmod), so no pathname is re-resolved and no unrelated file can be
+ * targeted. An empty marker carries no Size/Mtime and never verifies. */
+static void seal_void_marker_fd(int marker_fd) {
+    if (marker_fd < 0)
+        return;
+    if (ftruncate(marker_fd, 0) != 0)
+        fprintf(stderr, "seal: could not roll back incomplete marker\n");
 }
 
 static int seal_read_full(int fd, void *buf, size_t len) {
@@ -481,6 +510,7 @@ int lst_seal(const char *file_path) {
     if (seal_marker_path(marker, sizeof(marker), leaf) != 0 ||
         fchmod(marker_fd, S_IRUSR | S_IRGRP | S_IROTH) != 0) {
         fprintf(stderr, "seal: cannot write marker: %s.sealed\n", canon);
+        seal_void_marker_fd(marker_fd);
         close(marker_fd);
         close(fd);
         close(dirfd);
@@ -489,6 +519,9 @@ int lst_seal(const char *file_path) {
     /* Set read-only: 444 (fd-based; no path re-lookup) */
     if (fchmod(fd, S_IRUSR | S_IRGRP | S_IROTH) != 0) {
         fprintf(stderr, "seal: cannot seal: %s\n", file_path);
+        /* The marker alone is enough for lst_seal_verify() to succeed, so a
+         * seal that did not complete must not leave a valid fingerprint. */
+        seal_void_marker_fd(marker_fd);
         close(marker_fd);
         close(fd);
         close(dirfd);
@@ -581,9 +614,13 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
 
     mode_t original_mode = st.st_mode & 07777;
     off_t original_size = st.st_size;
-    struct timespec original_times[2] = {st.st_atim, st.st_mtim};
+    struct timespec original_times[2] = {SEAL_ST_ATIM(st), SEAL_ST_MTIM(st)};
     char marker[LST_MAX_PATH];
     int afd = -1;
+    /* Writable descriptor on the verified data inode, held until the
+     * amendment is committed so rollback (ftruncate/futimens) can still act
+     * on it after the append stream is closed. `fd` is usually O_RDONLY. */
+    int rollback_fd = -1;
     FILE *f = NULL;
     int made_writable = 0;
     int marker_writable = 0;
@@ -621,6 +658,9 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
         ast.st_dev != st.st_dev || ast.st_ino != st.st_ino) {
         goto amend_fail;
     }
+    rollback_fd = dup(afd);
+    if (rollback_fd < 0)
+        goto amend_fail;
     f = fdopen(afd, "a");
     if (!f) {
         goto amend_fail;
@@ -658,7 +698,9 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     /* Make seal marker writable, then re-seal */
     if (seal_marker_path(marker, sizeof(marker), leaf) != 0)
         goto amend_fail;
-    marker_restore_fd = openat(dirfd, marker, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    /* O_NONBLOCK: a hostile FIFO marker must be rejected by the fstat
+     * check below, not block the open waiting for a writer. */
+    marker_restore_fd = openat(dirfd, marker, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
     if (marker_restore_fd < 0 && errno != ENOENT)
         goto amend_fail;
     if (marker_restore_fd >= 0) {
@@ -666,7 +708,8 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
         if (fstat(marker_restore_fd, &marker_st) != 0 || !S_ISREG(marker_st.st_mode))
             goto amend_fail;
         marker_mode = marker_st.st_mode & 07777;
-        if (marker_st.st_size < 0)
+        if (marker_st.st_size < 0 ||
+            (unsigned long long)marker_st.st_size > (unsigned long long)SEAL_MARKER_MAX_BYTES)
             goto amend_fail;
         marker_backup_len = (size_t)marker_st.st_size;
         marker_backup = malloc(marker_backup_len ? marker_backup_len : 1);
@@ -684,7 +727,7 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode))
         goto amend_fail;
     if (marker_restore_fd >= 0) {
-        marker_fd = openat(dirfd, marker, O_WRONLY | O_NOFOLLOW | O_CLOEXEC);
+        marker_fd = openat(dirfd, marker, O_WRONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
         if (marker_fd < 0)
             goto amend_fail;
         {
@@ -719,6 +762,7 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     close(marker_restore_fd);
     marker_restore_fd = -1;
     free(marker_backup);
+    close(rollback_fd);
     close(fd);
     close(dirfd);
     return 0;
@@ -731,15 +775,20 @@ amend_fail:
     } else if (afd >= 0) {
         close(afd);
     }
-    if (amendment_attempted && fd >= 0) {
+    if (amendment_attempted) {
+        /* Roll back through the writable descriptor kept on the verified
+         * inode; `fd` is normally O_RDONLY and would fail with EBADF. */
+        int wfd = rollback_fd >= 0 ? rollback_fd : fd;
         struct stat current_st;
-        if (fstat(fd, &current_st) == 0 &&
+        if (fstat(wfd, &current_st) == 0 &&
             ((amendment_is_append && current_st.st_size > original_size) ||
              (!amendment_is_append && current_st.st_size != original_size))) {
-            if (ftruncate(fd, original_size) != 0) recovery_failed = 1;
+            if (ftruncate(wfd, original_size) != 0) recovery_failed = 1;
         }
-        if (futimens(fd, original_times) != 0) recovery_failed = 1;
+        if (futimens(wfd, original_times) != 0) recovery_failed = 1;
     }
+    if (rollback_fd >= 0)
+        close(rollback_fd);
     if (marker_fd >= 0 && marker_dirty && marker_restore_fd >= 0) {
         if (ftruncate(marker_fd, 0) != 0 || lseek(marker_fd, 0, SEEK_SET) < 0 ||
             (marker_backup_len > 0 &&
