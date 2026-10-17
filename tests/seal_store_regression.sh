@@ -93,3 +93,24 @@ if "$engine_bin" verify "$test_dir/legacy-real" 2>/dev/null; then
     exit 1
 fi
 echo 'empty-marker regression: pass'
+
+# fail closed: an invalid canonical marker must not fall back to the legacy marker (PRRT_kwDOSsdSEM6tcoqD)
+for kind in fifo symlink unreadable dir; do
+    rm -rf "$test_dir/legacy-real.sealed"
+    case "$kind" in
+        fifo) mkfifo "$test_dir/legacy-real.sealed" ;;
+        symlink) ln -s "$test_dir/legacy-link.sealed" "$test_dir/legacy-real.sealed" ;;
+        unreadable) printf 'x\n' > "$test_dir/legacy-real.sealed"; chmod 000 "$test_dir/legacy-real.sealed" ;;
+        dir) mkdir "$test_dir/legacy-real.sealed" ;;
+    esac
+    if [ "$kind" = unreadable ] && [ -r "$test_dir/legacy-real.sealed" ]; then
+        continue  # running as root: permission bits do not block reads
+    fi
+    if timeout 5 "$engine_bin" verify "$test_dir/legacy-link" 2>/dev/null; then
+        echo "invalid canonical marker ($kind) fell back to the legacy marker" >&2
+        exit 1
+    fi
+done
+rm -rf "$test_dir/legacy-real.sealed"
+"$engine_bin" verify "$test_dir/legacy-link"
+echo 'fail-closed marker regression: pass'

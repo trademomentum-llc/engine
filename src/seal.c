@@ -387,19 +387,40 @@ static FILE *seal_marker_open_at(int dirfd, const char *leaf, const char *mode) 
 static int seal_verify_marker_against_stat(const char *file_path, const char *canon,
                                            int dirfd, const char *leaf,
                                            const struct stat *st) {
-    FILE *f = seal_marker_open_at(dirfd, leaf, "r");
-    if (f) {
-        /* An empty marker carries no seal data (it is what a voided,
-         * rolled-back marker looks like); treat it as absent so a
-         * still-valid legacy marker is consulted. */
-        struct stat mst;
-        if (fstat(fileno(f), &mst) != 0) {
-            fclose(f);
+    /* Fail closed: only a canonical marker that is absent (ENOENT) or an
+     * empty regular file (a voided rollback) may fall back to the legacy
+     * marker. A FIFO, symlink, directory, unreadable entry or any other
+     * error fails verification instead of silently using the legacy one. */
+    FILE *f = NULL;
+    {
+        char marker[LST_MAX_PATH];
+        struct stat lst_st;
+        if (seal_marker_path(marker, sizeof(marker), leaf) != 0)
             return -1;
-        }
-        if (mst.st_size == 0) {
-            fclose(f);
-            f = NULL;
+        if (fstatat(dirfd, marker, &lst_st, AT_SYMLINK_NOFOLLOW) != 0) {
+            if (errno != ENOENT) {
+                fprintf(stderr, "seal: cannot inspect seal marker: %s\n", file_path);
+                return -1;
+            }
+        } else {
+            if (!S_ISREG(lst_st.st_mode)) {
+                fprintf(stderr, "seal: invalid seal marker (not a regular file): %s\n", file_path);
+                return -1;
+            }
+            f = seal_marker_open_at(dirfd, leaf, "r");
+            if (!f) {
+                fprintf(stderr, "seal: cannot open seal marker: %s\n", file_path);
+                return -1;
+            }
+            struct stat mst;
+            if (fstat(fileno(f), &mst) != 0 || !S_ISREG(mst.st_mode)) {
+                fclose(f);
+                return -1;
+            }
+            if (mst.st_size == 0) {
+                fclose(f);
+                f = NULL;
+            }
         }
     }
     if (!f) {
