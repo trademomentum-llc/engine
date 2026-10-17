@@ -1,0 +1,30 @@
+name: Engine validation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  linux-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Build C engine
+        run: make
+      - name: Seal and store regressions
+        run: |
+          bash tests/seal_store_regression.sh
+          cc -std=c11 -I include -o /tmp/engine-store-regression tests/store_regression.c src/store.c
+          timeout 10 /tmp/engine-store-regression
+      - name: Telemetry regressions
+        run: make -C telemetry test
+      - name: Python regressions and syntax
+        run: |
+          PYTHONPATH=nnos python3 -m unittest nnos.neurobalance.test_coordinator_efficiency
+          python3 -m compileall -q nnos telemetry
+          bash -n nnos/scripts/*.sh

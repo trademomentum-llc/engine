@@ -34,7 +34,7 @@
  * -------------------------------------------------------------------------- */
 
 static char *read_file_sss(const char *path, size_t *out_len) {
-    FILE *f = fopen(path, "rb");
+    FILE *f = lst_secure_fopen_resolved(path);
     if (!f) return NULL;
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
@@ -338,7 +338,13 @@ static void scan_dir_schema(lst_artifact_t *art, const char *dir, int depth) {
         if (should_skip_sss(ent->d_name)) continue;
 
         char child[LST_MAX_PATH];
-        snprintf(child, sizeof(child), "%s/%s", dir, ent->d_name);
+        {
+            int child_len = snprintf(child, sizeof(child), "%s/%s", dir, ent->d_name);
+            if (child_len < 0 || (size_t)child_len >= sizeof(child)) {
+                fprintf(stderr, "path too long, skipped: %s/%s\n", dir, ent->d_name);
+                continue;
+            }
+        }
 
         struct stat st;
         if (stat(child, &st) != 0) continue;
