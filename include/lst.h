@@ -52,6 +52,11 @@ extern "C" {
 #define LST_MAX_GUARDRAILS  128
 
 FILE *lst_secure_fopen(const char *path, const char *mode);
+/* Canonicalize `path` with realpath() (following symlinks, as directory
+ * scanners that classify entries with stat() do) and then open it with
+ * lst_secure_fopen(). Use this for files selected by stat()-based scans so
+ * symlinked sources are read instead of silently skipped. Read-only. */
+FILE *lst_secure_fopen_resolved(const char *path);
 
 /* --------------------------------------------------------------------------
  * Enumerations — all stored as uint8_t, no string comparisons at runtime

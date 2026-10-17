@@ -57,3 +57,39 @@ if ! (cd "$test_dir" && "$engine_bin" run security-scan "$test_dir/scanproj" 2>/
     exit 1
 fi
 echo 'security-scan symlink regression: pass'
+
+# code-check (and every recipe reader) must read symlinked sources (PRRT_kwDOSsdSEM6tcdNG)
+mkdir -p "$test_dir/ccproj"
+printf 'def f():\n    return 1\n' > "$test_dir/cc-target.py"
+ln -s "$test_dir/cc-target.py" "$test_dir/ccproj/link.py"
+cc_out="$(cd "$test_dir" && "$engine_bin" run code-check "$test_dir/ccproj" 2>&1 || true)"
+if ! printf '%s\n' "$cc_out" | grep -Eq '(^|[^0-9])1 files?|files[^0-9]*1'; then
+    echo "code-check did not analyze the symlinked source: $cc_out" >&2
+    exit 1
+fi
+echo 'code-check symlink regression: pass'
+
+# over-long project roots fail explicitly instead of truncating child paths (PRRT_kwDOSsdSEM6tcdNJ)
+long_root="$test_dir"
+while [ "${#long_root}" -lt 900 ]; do long_root="$long_root/dddddddddddddddddddddddddddddddddddddddd"; done
+mkdir -p "$long_root"
+if (cd "$test_dir" && "$engine_bin" run security-scan "$long_root" >/dev/null 2>&1); then
+    echo 'over-long project root was accepted' >&2
+    exit 1
+fi
+echo 'long-path regression: pass'
+
+# an empty (voided) canonical marker must not shadow a valid legacy marker (PRRT_kwDOSsdSEM6o5gC8 / tcdNO / tcdNS)
+printf 'legacy\n' > "$test_dir/legacy-real"
+ln -s "$test_dir/legacy-real" "$test_dir/legacy-link"
+"$engine_bin" seal "$test_dir/legacy-link"
+# Turn the canonical marker into a legacy (as-passed spelling) marker and
+# leave an empty canonical marker behind, as a voided rollback would.
+mv "$test_dir/legacy-real.sealed" "$test_dir/legacy-link.sealed"
+: > "$test_dir/legacy-real.sealed"
+"$engine_bin" verify "$test_dir/legacy-link"
+if "$engine_bin" verify "$test_dir/legacy-real" 2>/dev/null; then
+    echo 'empty canonical marker verified without a legacy marker' >&2
+    exit 1
+fi
+echo 'empty-marker regression: pass'

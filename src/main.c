@@ -183,7 +183,13 @@ static void batch_walk(const char *dir, const char *recipe_name, int depth,
         if (should_skip(ent->d_name)) continue;
 
         char child[LST_MAX_PATH];
-        snprintf(child, sizeof(child), "%s/%s", dir, ent->d_name);
+        {
+            int child_len = snprintf(child, sizeof(child), "%s/%s", dir, ent->d_name);
+            if (child_len < 0 || (size_t)child_len >= sizeof(child)) {
+                fprintf(stderr, "path too long, skipped: %s/%s\n", dir, ent->d_name);
+                continue;
+            }
+        }
 
         struct stat st;
         if (stat(child, &st) == 0 && S_ISDIR(st.st_mode))

@@ -186,7 +186,7 @@ static const char *TMG_CUSTODY_INDICATORS[] = {
  * -------------------------------------------------------------------------- */
 
 static char *read_file_tmg(const char *path, size_t *out_len) {
-    FILE *f = lst_secure_fopen(path, "rb");
+    FILE *f = lst_secure_fopen_resolved(path);
     if (!f) return NULL;
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
@@ -667,7 +667,13 @@ static void scan_dir_tmg(lst_artifact_t *art, tmg_scan_ctx_t *ctx,
         if (should_skip_tmg(ent->d_name)) continue;
 
         char child[LST_MAX_PATH];
-        snprintf(child, sizeof(child), "%s/%s", dir, ent->d_name);
+        {
+            int child_len = snprintf(child, sizeof(child), "%s/%s", dir, ent->d_name);
+            if (child_len < 0 || (size_t)child_len >= sizeof(child)) {
+                fprintf(stderr, "path too long, skipped: %s/%s\n", dir, ent->d_name);
+                continue;
+            }
+        }
 
         struct stat st;
         if (stat(child, &st) != 0) continue;

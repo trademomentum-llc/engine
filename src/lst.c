@@ -55,6 +55,15 @@ FILE *lst_secure_fopen(const char *path, const char *mode) {
     return f;
 }
 
+FILE *lst_secure_fopen_resolved(const char *path) {
+    if (!path) return NULL;
+    char *canon = realpath(path, NULL);
+    if (!canon) return NULL;
+    FILE *f = lst_secure_fopen(canon, "rb");
+    free(canon);
+    return f;
+}
+
 /* Safe string copy into fixed buffer */
 static void scopy(char *dst, const char *src, size_t maxlen) {
     if (!src) { dst[0] = '\0'; return; }
@@ -121,11 +130,16 @@ static int dir_exists(const char *path) {
 }
 
 /* Build a path: base/a/b into dst */
+/* On overflow, report it and leave dst empty rather than a truncated path
+ * (which could name a different file); opening "" then fails cleanly. */
 static void path_join(char *dst, size_t maxlen, const char *base, const char *a, const char *b) {
-    if (b)
-        snprintf(dst, maxlen, "%s/%s/%s", base, a, b);
-    else
-        snprintf(dst, maxlen, "%s/%s", base, a);
+    int n = b ? snprintf(dst, maxlen, "%s/%s/%s", base, a, b)
+              : snprintf(dst, maxlen, "%s/%s", base, a);
+    if (n < 0 || (size_t)n >= maxlen) {
+        fprintf(stderr, "lst: path too long, skipped: %s/%s%s%s\n",
+                base, a, b ? "/" : "", b ? b : "");
+        if (maxlen > 0) dst[0] = '\0';
+    }
 }
 
 /* --------------------------------------------------------------------------
@@ -359,7 +373,12 @@ lst_artifact_t *lst_create(const char *project_path) {
     const char *base = rp ? rp : project_path;
     /* Refuse rather than truncate: a silently shortened path would point the
      * scanners and recipes at a different (or nonexistent) directory. */
-    if (strlen(base) >= LST_MAX_PATH) {
+    /* Also reserve room for "/<entry>" so the scanners' child paths
+     * (dir + "/" + a readdir() name of up to LST_MAX_NAME-1 bytes) are not
+     * truncated for roots just under the limit. Fail explicitly. */
+    if (strlen(base) + 1 + LST_MAX_NAME >= LST_MAX_PATH) {
+        fprintf(stderr, "lst: project path too long (max %d bytes): %s\n",
+                LST_MAX_PATH - LST_MAX_NAME - 2, base);
         free(rp);
         free(art);
         return NULL;

@@ -130,6 +130,7 @@ static int seal_write_marker_at(int dirfd, const char *leaf, const char *file_pa
     FILE *f = seal_marker_stream(stream_fd, "w", 1);
     if (!f) {
         int saved_errno = errno;
+        (void)ftruncate(fd, 0);
         close(fd);
         errno = saved_errno;
         return -1;
@@ -138,6 +139,9 @@ static int seal_write_marker_at(int dirfd, const char *leaf, const char *file_pa
     if (seal_write_marker_stream(f, file_path, st) != 0) {
         int saved_errno = errno;
         fclose(f);
+        /* Void the half-written marker through its own descriptor so no
+         * partial Size/Mtime content survives; no pathname is re-resolved. */
+        (void)ftruncate(fd, 0);
         close(fd);
         errno = saved_errno;
         return -1;
@@ -145,6 +149,7 @@ static int seal_write_marker_at(int dirfd, const char *leaf, const char *file_pa
 
     if (fclose(f) != 0) {
         int saved_errno = errno;
+        (void)ftruncate(fd, 0);
         close(fd);
         errno = saved_errno;
         return -1;
@@ -383,6 +388,20 @@ static int seal_verify_marker_against_stat(const char *file_path, const char *ca
                                            int dirfd, const char *leaf,
                                            const struct stat *st) {
     FILE *f = seal_marker_open_at(dirfd, leaf, "r");
+    if (f) {
+        /* An empty marker carries no seal data (it is what a voided,
+         * rolled-back marker looks like); treat it as absent so a
+         * still-valid legacy marker is consulted. */
+        struct stat mst;
+        if (fstat(fileno(f), &mst) != 0) {
+            fclose(f);
+            return -1;
+        }
+        if (mst.st_size == 0) {
+            fclose(f);
+            f = NULL;
+        }
+    }
     if (!f) {
         /* Legacy fallback: files sealed through a final-component symlink
          * have their marker at "<original spelling>.sealed", beside the
@@ -424,7 +443,13 @@ static int seal_verify_marker_against_stat(const char *file_path, const char *ca
             have_ino = 1;
         }
     }
-    fclose(f);
+    {
+        int read_error = ferror(f);
+        if (fclose(f) != 0 || read_error) {
+            fprintf(stderr, "seal: cannot read seal marker: %s\n", file_path);
+            return -1;
+        }
+    }
 
     if ((long)st->st_size != stored_size) {
         fprintf(stderr, "seal: INTEGRITY VIOLATION — size mismatch: %s\n", file_path);
@@ -629,7 +654,8 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     int marker_mode_changed = 0;
     /* Set when this amendment created a fresh canonical marker (no marker
      * existed, e.g. verification succeeded via the legacy marker). Recovery
-     * must void and remove it, or it would shadow the still-valid legacy
+     * must void it (truncate via its fd); verify treats an empty marker as
+     * absent, so it cannot shadow the still-valid legacy
      * marker and make every later verify fail against rolled-back data. */
     int marker_created = 0;
     mode_t marker_mode = 0;
@@ -753,14 +779,12 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
         if (fchmod(marker_restore_fd, S_IRUSR | S_IRGRP | S_IROTH) != 0)
             goto amend_fail;
     } else {
+        /* On failure seal_write_marker_at() has already voided (truncated)
+         * any half-written marker through its own descriptor. An empty
+         * marker is treated as absent by verify, so the legacy marker
+         * stays authoritative; no pathname is unlinked (no check/unlink
+         * race). */
         if (seal_write_marker_at(dirfd, leaf, file_path, &st, &marker_fd) != 0) {
-            /* seal_write_marker_at() may have created the file before
-             * failing; remove it only if it is still an empty regular file
-             * (it held no prior marker: openat returned ENOENT above). */
-            struct stat partial_st;
-            if (fstatat(dirfd, marker, &partial_st, AT_SYMLINK_NOFOLLOW) == 0 &&
-                S_ISREG(partial_st.st_mode) && partial_st.st_size == 0)
-                (void)unlinkat(dirfd, marker, 0);
             goto amend_fail;
         }
         marker_created = 1;
@@ -812,14 +836,11 @@ amend_fail:
             recovery_failed = 1;
     }
     if (marker_created && marker_fd >= 0) {
-        /* Void through the held descriptor, then unlink the name only if it
-         * still refers to the same inode we created. */
-        struct stat held_st, name_st;
-        seal_void_marker_fd(marker_fd);
-        if (fstat(marker_fd, &held_st) != 0 ||
-            fstatat(dirfd, marker, &name_st, AT_SYMLINK_NOFOLLOW) != 0 ||
-            held_st.st_dev != name_st.st_dev || held_st.st_ino != name_st.st_ino ||
-            unlinkat(dirfd, marker, 0) != 0)
+        /* Void the marker this amendment created through the held
+         * descriptor only. Verify treats an empty marker as absent and
+         * falls back to the still-valid legacy marker, so no pathname is
+         * re-resolved or unlinked (avoids a check-then-unlink race). */
+        if (ftruncate(marker_fd, 0) != 0)
             recovery_failed = 1;
     }
     if (marker_fd >= 0)
