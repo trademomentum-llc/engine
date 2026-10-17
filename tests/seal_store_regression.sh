@@ -133,3 +133,56 @@ if ! printf '%s\n' "$rf_err" | grep -q 'recovery incomplete'; then
     exit 1
 fi
 echo 'rollback size-check regression: pass'
+
+# a shrink by another writer during amend must be reported as incomplete recovery (PRRT_kwDOSsdSEM6tjKJi)
+printf 'shrink-check-original\n' > "$test_dir/sh"
+"$fault_bin" seal "$test_dir/sh"
+sh_err="$(SEAL_FAULT_AFTER_APPEND=1 SEAL_FAULT_SHRINK_BEFORE_ROLLBACK=1 timeout 3 "$fault_bin" amend "$test_dir/sh" 'x' 2>&1 || true)"
+if ! printf '%s\n' "$sh_err" | grep -q 'recovery incomplete'; then
+    echo "shrunk file during rollback was not flagged: $sh_err" >&2
+    exit 1
+fi
+if [ "$(tr -d '\000' < "$test_dir/sh" | wc -c)" != "$(wc -c < "$test_dir/sh")" ]; then
+    echo 'rollback zero-extended a shrunk file' >&2
+    exit 1
+fi
+echo 'rollback shrink regression: pass'
+
+# a failed reseal must leave the existing valid marker intact (PRRT_kwDOSsdSEM6tjKJl)
+printf 'reseal-check\n' > "$test_dir/rs"
+"$fault_bin" seal "$test_dir/rs"
+rs_marker_before="$(cat "$test_dir/rs.sealed")"
+if SEAL_FAULT_DATA_FCHMOD=1 "$fault_bin" seal "$test_dir/rs" 2>/dev/null; then
+    echo 'reseal succeeded despite a failed data chmod' >&2
+    exit 1
+fi
+if [ "$(cat "$test_dir/rs.sealed")" != "$rs_marker_before" ]; then
+    echo 'failed reseal modified the existing marker' >&2
+    exit 1
+fi
+if ls "$test_dir"/rs.sealed.tmp.* >/dev/null 2>&1; then
+    echo 'failed reseal left a temporary marker behind' >&2
+    exit 1
+fi
+"$engine_bin" verify "$test_dir/rs"
+# a failed first seal must not publish any marker
+printf 'first-seal\n' > "$test_dir/fs"
+if SEAL_FAULT_DATA_FCHMOD=1 "$fault_bin" seal "$test_dir/fs" 2>/dev/null; then exit 1; fi
+if [ -e "$test_dir/fs.sealed" ] || "$engine_bin" verify "$test_dir/fs" 2>/dev/null; then
+    echo 'failed first seal left a verifiable marker' >&2
+    exit 1
+fi
+echo 'reseal marker-preservation regression: pass'
+
+# verify must work through an execute-only (search-only) parent directory (PRRT_kwDOSsdSEM6tjKJn)
+mkdir -p "$test_dir/xonly/inner"
+printf 'x-only\n' > "$test_dir/xonly/inner/f"
+"$engine_bin" seal "$test_dir/xonly/inner/f"
+chmod 111 "$test_dir/xonly"
+if ! "$engine_bin" verify "$test_dir/xonly/inner/f"; then
+    chmod 755 "$test_dir/xonly"
+    echo 'verify rejected a sealed file under an execute-only directory' >&2
+    exit 1
+fi
+chmod 755 "$test_dir/xonly"
+echo 'execute-only directory regression: pass'

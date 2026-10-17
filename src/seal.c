@@ -26,6 +26,10 @@
 
 #define _XOPEN_SOURCE 700
 #define _POSIX_C_SOURCE 200809L
+#if defined(__linux__)
+/* O_PATH (search-only directory anchors) is a GNU/Linux extension. */
+#define _GNU_SOURCE
+#endif
 #if defined(__APPLE__)
 /* Expose struct stat's st_atimespec/st_mtimespec alongside POSIX names. */
 #define _DARWIN_C_SOURCE
@@ -100,74 +104,76 @@ static int seal_canonicalize(const char *path, char *dst, size_t maxlen) {
     return 0;
 }
 
+/* Unlink a temporary marker this process created, but only if the name
+ * still refers to the inode held in fd (no check-then-unlink substitution
+ * of an unrelated file can be removed by a concurrent writer's swap). */
+static void seal_discard_temp_marker(int dirfd, const char *tmp_name, int fd) {
+    struct stat held, named;
+    if (fd >= 0) (void)ftruncate(fd, 0);
+    if (fd < 0 || fstat(fd, &held) != 0) return;
+    if (fstatat(dirfd, tmp_name, &named, AT_SYMLINK_NOFOLLOW) != 0) return;
+    if (named.st_dev == held.st_dev && named.st_ino == held.st_ino)
+        (void)unlinkat(dirfd, tmp_name, 0);
+}
+
+/* Write a complete marker to a new, exclusively created temporary file in
+ * dirfd. The live marker is never truncated here: the caller publishes the
+ * temporary with renameat() only once sealing has fully succeeded, so a
+ * failed reseal preserves an existing valid marker
+ * (PRRT_kwDOSsdSEM6tjKJl). */
 static int seal_write_marker_at(int dirfd, const char *leaf, const char *file_path,
-                                const struct stat *st, int *marker_fd_out) {
+                                const struct stat *st, int *marker_fd_out,
+                                char *tmp_out, size_t tmp_size) {
     char marker[LST_MAX_PATH];
     if (seal_marker_path(marker, sizeof(marker), leaf) != 0)
         return -1;
 
-    int fd = openat(dirfd, marker,
-                    O_RDWR | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);
+    int fd = -1;
+    for (unsigned attempt = 0; attempt < 16 && fd < 0; attempt++) {
+        int n = snprintf(tmp_out, tmp_size, "%s.tmp.%ld.%u",
+                         marker, (long)getpid(), attempt);
+        if (n < 0 || (size_t)n >= tmp_size) {
+            errno = ENAMETOOLONG;
+            return -1;
+        }
+        fd = openat(dirfd, tmp_out,
+                    O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+        if (fd < 0 && errno != EEXIST)
+            return -1;
+    }
     if (fd < 0)
         return -1;
 
     struct stat marker_st;
-    if (fstat(fd, &marker_st) != 0 || !S_ISREG(marker_st.st_mode)) {
-        int saved_errno = (errno != 0) ? errno : EINVAL;
-        close(fd);
-        errno = saved_errno;
-        return -1;
-    }
+    if (fstat(fd, &marker_st) != 0 || !S_ISREG(marker_st.st_mode))
+        goto fail;
 
     int stream_fd = dup(fd);
-    if (stream_fd < 0) {
-        int saved_errno = errno;
-        close(fd);
-        errno = saved_errno;
-        return -1;
-    }
+    if (stream_fd < 0)
+        goto fail;
 
     FILE *f = seal_marker_stream(stream_fd, "w", 1);
-    if (!f) {
-        int saved_errno = errno;
-        (void)ftruncate(fd, 0);
-        close(fd);
-        errno = saved_errno;
-        return -1;
-    }
+    if (!f)
+        goto fail;
 
     if (seal_write_marker_stream(f, file_path, st) != 0) {
-        int saved_errno = errno;
         fclose(f);
-        /* Void the half-written marker through its own descriptor so no
-         * partial Size/Mtime content survives; no pathname is re-resolved. */
-        (void)ftruncate(fd, 0);
-        close(fd);
-        errno = saved_errno;
-        return -1;
+        goto fail;
     }
-
-    if (fclose(f) != 0) {
-        int saved_errno = errno;
-        (void)ftruncate(fd, 0);
-        close(fd);
-        errno = saved_errno;
-        return -1;
-    }
+    if (fclose(f) != 0)
+        goto fail;
 
     *marker_fd_out = fd;
     return 0;
-}
 
-/* Roll back a marker written by an incomplete seal. Truncation goes through
- * the marker's own O_RDWR descriptor (its access mode is unaffected by a
- * later fchmod), so no pathname is re-resolved and no unrelated file can be
- * targeted. An empty marker carries no Size/Mtime and never verifies. */
-static void seal_void_marker_fd(int marker_fd) {
-    if (marker_fd < 0)
-        return;
-    if (ftruncate(marker_fd, 0) != 0)
-        fprintf(stderr, "seal: could not roll back incomplete marker\n");
+fail:
+    {
+        int saved_errno = (errno != 0) ? errno : EINVAL;
+        seal_discard_temp_marker(dirfd, tmp_out, fd);
+        close(fd);
+        errno = saved_errno;
+        return -1;
+    }
 }
 
 static int seal_read_full(int fd, void *buf, size_t len) {
@@ -260,11 +266,22 @@ static int seal_rewrite_marker_fd(int marker_fd, const char *file_path, const st
     return 0;
 }
 
+/* Directory descriptors here are only used as openat()/renameat() anchors,
+ * which need search (execute) permission, not read permission
+ * (PRRT_kwDOSsdSEM6tjKJn). */
+#if defined(O_PATH)
+#define SEAL_DIR_OPEN_FLAGS (O_PATH | O_DIRECTORY)
+#elif defined(O_SEARCH)
+#define SEAL_DIR_OPEN_FLAGS (O_SEARCH | O_DIRECTORY)
+#else
+#define SEAL_DIR_OPEN_FLAGS (O_RDONLY | O_DIRECTORY)
+#endif
+
 /* Open a canonical absolute directory one component at a time so later
  * openat() calls stay anchored to a verified directory descriptor. */
 static int seal_open_dir(const char *canon_dir) {
     if (!canon_dir || canon_dir[0] != '/') return -1;
-    int dirfd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    int dirfd = open("/", SEAL_DIR_OPEN_FLAGS | O_CLOEXEC);
     if (dirfd < 0) return -1;
 
     if (strcmp(canon_dir, "/") == 0)
@@ -286,7 +303,7 @@ static int seal_open_dir(const char *canon_dir) {
             component[len] = '\0';
 
             int nextfd = openat(dirfd, component,
-                                O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+                                SEAL_DIR_OPEN_FLAGS | O_NOFOLLOW | O_CLOEXEC);
             close(dirfd);
             if (nextfd < 0) return -1;
             dirfd = nextfd;
@@ -546,28 +563,50 @@ int lst_seal(const char *file_path) {
     }
 
     char marker[LST_MAX_PATH];
+    char tmp_marker[LST_MAX_PATH];
     int marker_fd = -1;
-    if (seal_write_marker_at(dirfd, leaf, file_path, &st, &marker_fd) != 0) {
+    if (seal_marker_path(marker, sizeof(marker), leaf) != 0 ||
+        seal_write_marker_at(dirfd, leaf, file_path, &st, &marker_fd,
+                             tmp_marker, sizeof(tmp_marker)) != 0) {
         fprintf(stderr, "seal: cannot write marker: %s.sealed\n", canon);
         close(fd);
         close(dirfd);
         return -1;
     }
-    if (seal_marker_path(marker, sizeof(marker), leaf) != 0 ||
-        fchmod(marker_fd, S_IRUSR | S_IRGRP | S_IROTH) != 0) {
+    if (fchmod(marker_fd, S_IRUSR | S_IRGRP | S_IROTH) != 0) {
         fprintf(stderr, "seal: cannot write marker: %s.sealed\n", canon);
-        seal_void_marker_fd(marker_fd);
+        seal_discard_temp_marker(dirfd, tmp_marker, marker_fd);
         close(marker_fd);
         close(fd);
         close(dirfd);
         return -1;
     }
     /* Set read-only: 444 (fd-based; no path re-lookup) */
-    if (fchmod(fd, S_IRUSR | S_IRGRP | S_IROTH) != 0) {
+    int data_chmod_rc = fchmod(fd, S_IRUSR | S_IRGRP | S_IROTH);
+#ifdef SEAL_FAULT_INJECTION
+    /* Test-only: simulate a caller that cannot chmod the data file. */
+    if (getenv("SEAL_FAULT_DATA_FCHMOD")) {
+        (void)fchmod(fd, st.st_mode & 07777);
+        data_chmod_rc = -1;
+        errno = EPERM;
+    }
+#endif
+    if (data_chmod_rc != 0) {
         fprintf(stderr, "seal: cannot seal: %s\n", file_path);
-        /* The marker alone is enough for lst_seal_verify() to succeed, so a
-         * seal that did not complete must not leave a valid fingerprint. */
-        seal_void_marker_fd(marker_fd);
+        /* The new marker was never published; any existing marker is
+         * left exactly as it was. */
+        seal_discard_temp_marker(dirfd, tmp_marker, marker_fd);
+        close(marker_fd);
+        close(fd);
+        close(dirfd);
+        return -1;
+    }
+    /* Publish atomically: readers see either the old marker or the
+     * complete new one, never a truncated or partial marker. */
+    if (renameat(dirfd, tmp_marker, dirfd, marker) != 0) {
+        fprintf(stderr, "seal: cannot write marker: %s.sealed\n", canon);
+        (void)fchmod(fd, st.st_mode & 07777);
+        seal_discard_temp_marker(dirfd, tmp_marker, marker_fd);
         close(marker_fd);
         close(fd);
         close(dirfd);
@@ -678,6 +717,7 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
      * must void it (truncate via its fd); verify treats an empty marker as
      * absent, so it cannot shadow the still-valid legacy
      * marker and make every later verify fail against rolled-back data. */
+    char tmp_marker[LST_MAX_PATH] = {0};
     int marker_created = 0;
     mode_t marker_mode = 0;
     char *marker_backup = NULL;
@@ -686,7 +726,6 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     int marker_fd = -1;
     int restore_immutable = 0;
     int amendment_attempted = 0;
-    int amendment_is_append = 0;
     int marker_dirty = 0;
 
 #ifdef __linux__
@@ -707,7 +746,6 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     if (afd < 0) {
         goto amend_fail;
     }
-    amendment_is_append = 1;
     struct stat ast;
     if (fstat(afd, &ast) != 0 || !S_ISREG(ast.st_mode) ||
         ast.st_dev != st.st_dev || ast.st_ino != st.st_ino) {
@@ -804,12 +842,11 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
         if (fchmod(marker_restore_fd, S_IRUSR | S_IRGRP | S_IROTH) != 0)
             goto amend_fail;
     } else {
-        /* On failure seal_write_marker_at() has already voided (truncated)
-         * any half-written marker through its own descriptor. An empty
-         * marker is treated as absent by verify, so the legacy marker
-         * stays authoritative; no pathname is unlinked (no check/unlink
-         * race). */
-        if (seal_write_marker_at(dirfd, leaf, file_path, &st, &marker_fd) != 0) {
+        /* The new marker is written to an exclusive temporary and only
+         * published (renameat) once the reseal has fully succeeded; until
+         * then the legacy marker stays authoritative. */
+        if (seal_write_marker_at(dirfd, leaf, file_path, &st, &marker_fd,
+                                 tmp_marker, sizeof(tmp_marker)) != 0) {
             goto amend_fail;
         }
         marker_created = 1;
@@ -822,6 +859,11 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     if (restore_immutable && seal_set_immutable_fd(fd, 1) != 0)
         goto amend_fail;
 #endif
+    if (marker_created) {
+        if (renameat(dirfd, tmp_marker, dirfd, marker) != 0)
+            goto amend_fail;
+        marker_created = 0;
+    }
     close(marker_fd);
     marker_fd = -1;
     close(marker_restore_fd);
@@ -845,6 +887,11 @@ amend_fail:
          * inode; `fd` is normally O_RDONLY and would fail with EBADF. */
         int wfd = rollback_fd >= 0 ? rollback_fd : fd;
         struct stat current_st;
+#ifdef SEAL_FAULT_INJECTION
+        /* Test-only: simulate another writer shrinking the inode. */
+        if (getenv("SEAL_FAULT_SHRINK_BEFORE_ROLLBACK"))
+            (void)ftruncate(wfd, original_size > 0 ? original_size - 1 : 0);
+#endif
         int stat_rc = fstat(wfd, &current_st);
 #ifdef SEAL_FAULT_INJECTION
         /* Test-only build (-DSEAL_FAULT_INJECTION): simulate a failing size
@@ -860,8 +907,13 @@ amend_fail:
              * it could not be confirmed. */
             recovery_failed = 1;
             (void)ftruncate(wfd, original_size);
-        } else if ((amendment_is_append && current_st.st_size > original_size) ||
-                   (!amendment_is_append && current_st.st_size != original_size)) {
+        } else if (current_st.st_size < original_size) {
+            /* Another writer shrank the verified inode below its sealed
+             * size: the lost bytes cannot be restored, so never extend
+             * with zeros and always report incomplete recovery
+             * (PRRT_kwDOSsdSEM6tjKJi). */
+            recovery_failed = 1;
+        } else if (current_st.st_size > original_size) {
             if (ftruncate(wfd, original_size) != 0) recovery_failed = 1;
         }
         if (futimens(wfd, original_times) != 0) recovery_failed = 1;
@@ -875,12 +927,9 @@ amend_fail:
             recovery_failed = 1;
     }
     if (marker_created && marker_fd >= 0) {
-        /* Void the marker this amendment created through the held
-         * descriptor only. Verify treats an empty marker as absent and
-         * falls back to the still-valid legacy marker, so no pathname is
-         * re-resolved or unlinked (avoids a check-then-unlink race). */
-        if (ftruncate(marker_fd, 0) != 0)
-            recovery_failed = 1;
+        /* Discard the unpublished temporary marker (identity-checked
+         * against the held descriptor before unlinking). */
+        seal_discard_temp_marker(dirfd, tmp_marker, marker_fd);
     }
     if (marker_fd >= 0)
         close(marker_fd);

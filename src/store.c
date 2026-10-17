@@ -111,39 +111,60 @@ int lst_store_write(const lst_artifact_t *art, const char *store_dir) {
         return -1;
     }
 
-    /* O_NONBLOCK: an existing leaf replaced by a FIFO fails with ENXIO
-     * instead of blocking for a reader; anything else non-regular is
-     * rejected by the fstat check before it is wrapped in a FILE *. */
-    int fd = openat(dirfd, path,
-                    O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0600);
-    close(dirfd);
-    if (fd < 0) {
-        fprintf(stderr, "store: cannot write %s/%s\n", store_dir, path);
+    /* An existing leaf that is not a regular file (FIFO, symlink, dir...)
+     * is refused rather than replaced. */
+    struct stat leaf_st;
+    if (fstatat(dirfd, path, &leaf_st, AT_SYMLINK_NOFOLLOW) == 0 &&
+        !S_ISREG(leaf_st.st_mode)) {
+        close(dirfd);
+        fprintf(stderr, "store: refusing non-regular store file %s/%s\n", store_dir, path);
         return -1;
     }
-    struct stat leaf_st;
-    int fl = -1;
-    if (fstat(fd, &leaf_st) != 0 || !S_ISREG(leaf_st.st_mode) ||
-        (fl = fcntl(fd, F_GETFL)) < 0 || fcntl(fd, F_SETFL, fl & ~O_NONBLOCK) != 0) {
-        close(fd);
-        fprintf(stderr, "store: refusing non-regular store file %s/%s\n", store_dir, path);
+
+    /* Write a complete artifact to an exclusive temporary, then publish it
+     * with renameat(): a failed or partial write never destroys the
+     * previous artifact, and concurrent writers cannot interleave bytes in
+     * one file (last complete write wins). */
+    char tmp[LST_MAX_PATH];
+    int fd = -1;
+    for (unsigned attempt = 0; attempt < 16 && fd < 0; attempt++) {
+        int n = snprintf(tmp, sizeof(tmp), ".%s.tmp.%ld.%u", path, (long)getpid(), attempt);
+        if (n < 0 || (size_t)n >= sizeof(tmp)) {
+            close(dirfd);
+            fprintf(stderr, "store: composed path too long under store directory: %s\n", store_dir);
+            return -1;
+        }
+        fd = openat(dirfd, tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+        if (fd < 0 && errno != EEXIST)
+            break;
+    }
+    if (fd < 0) {
+        close(dirfd);
+        fprintf(stderr, "store: cannot write %s/%s\n", store_dir, path);
         return -1;
     }
     FILE *f = fdopen(fd, "wb");
     if (!f) {
+        (void)unlinkat(dirfd, tmp, 0);
         close(fd);
+        close(dirfd);
         fprintf(stderr, "store: cannot write %s/%s\n", store_dir, path);
         return -1;
     }
 
     size_t written = fwrite(art, sizeof(lst_artifact_t), 1, f);
+    int flush_rc = fflush(f);
+    int sync_rc = flush_rc == 0 ? fsync(fileno(f)) : -1;
     int close_rc = fclose(f);
 
-    if (written != 1 || close_rc != 0) {
+    if (written != 1 || flush_rc != 0 || sync_rc != 0 || close_rc != 0 ||
+        renameat(dirfd, tmp, dirfd, path) != 0) {
+        (void)unlinkat(dirfd, tmp, 0);
+        close(dirfd);
         fprintf(stderr, "store: incomplete write to %s/%s\n", store_dir, path);
         return -1;
     }
-
+    close(dirfd);
     return 0;
 }
 
