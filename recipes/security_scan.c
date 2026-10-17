@@ -1,4 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
+#define _XOPEN_SOURCE 700  /* realpath() */
 
 /*
  * security_scan.c — Security Vulnerability Scanner Recipe
@@ -33,7 +34,15 @@
  * -------------------------------------------------------------------------- */
 
 static char *read_file_sec(const char *path, size_t *out_len) {
-    FILE *f = lst_secure_fopen(path, "rb");
+    /* scan_dir_security() classifies entries with stat(), which follows
+     * symlinks, so a symlinked source file is selected as a regular file.
+     * Canonicalize before the O_NOFOLLOW open (as the core reader does) so
+     * legitimate symlinked sources are still scanned instead of silently
+     * skipped, which would yield a false zero-issue SECURE report. */
+    char *canon = realpath(path, NULL);
+    if (!canon) return NULL;
+    FILE *f = lst_secure_fopen(canon, "rb");
+    free(canon);
     if (!f) return NULL;
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);

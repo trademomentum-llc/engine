@@ -623,7 +623,15 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
     int rollback_fd = -1;
     FILE *f = NULL;
     int made_writable = 0;
-    int marker_writable = 0;
+    /* Set once the existing marker's mode has been changed and never
+     * cleared, so a failure after the marker is re-sealed to 0444 still
+     * restores the saved original mode (rollback contract). */
+    int marker_mode_changed = 0;
+    /* Set when this amendment created a fresh canonical marker (no marker
+     * existed, e.g. verification succeeded via the legacy marker). Recovery
+     * must void and remove it, or it would shadow the still-valid legacy
+     * marker and make every later verify fail against rolled-back data. */
+    int marker_created = 0;
     mode_t marker_mode = 0;
     char *marker_backup = NULL;
     size_t marker_backup_len = 0;
@@ -720,9 +728,9 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
                 seal_read_full(marker_restore_fd, marker_backup, marker_backup_len) != 0)
                 goto amend_fail;
         }
+        marker_mode_changed = 1;
         if (fchmod(marker_restore_fd, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH) != 0)
             goto amend_fail;
-        marker_writable = 1;
     }
     if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode))
         goto amend_fail;
@@ -744,10 +752,18 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
             goto amend_fail;
         if (fchmod(marker_restore_fd, S_IRUSR | S_IRGRP | S_IROTH) != 0)
             goto amend_fail;
-        marker_writable = 0;
     } else {
-        if (seal_write_marker_at(dirfd, leaf, file_path, &st, &marker_fd) != 0)
+        if (seal_write_marker_at(dirfd, leaf, file_path, &st, &marker_fd) != 0) {
+            /* seal_write_marker_at() may have created the file before
+             * failing; remove it only if it is still an empty regular file
+             * (it held no prior marker: openat returned ENOENT above). */
+            struct stat partial_st;
+            if (fstatat(dirfd, marker, &partial_st, AT_SYMLINK_NOFOLLOW) == 0 &&
+                S_ISREG(partial_st.st_mode) && partial_st.st_size == 0)
+                (void)unlinkat(dirfd, marker, 0);
             goto amend_fail;
+        }
+        marker_created = 1;
         if (fchmod(marker_fd, S_IRUSR | S_IRGRP | S_IROTH) != 0)
             goto amend_fail;
     }
@@ -795,9 +811,20 @@ amend_fail:
              seal_write_full(marker_fd, marker_backup, marker_backup_len) != 0))
             recovery_failed = 1;
     }
+    if (marker_created && marker_fd >= 0) {
+        /* Void through the held descriptor, then unlink the name only if it
+         * still refers to the same inode we created. */
+        struct stat held_st, name_st;
+        seal_void_marker_fd(marker_fd);
+        if (fstat(marker_fd, &held_st) != 0 ||
+            fstatat(dirfd, marker, &name_st, AT_SYMLINK_NOFOLLOW) != 0 ||
+            held_st.st_dev != name_st.st_dev || held_st.st_ino != name_st.st_ino ||
+            unlinkat(dirfd, marker, 0) != 0)
+            recovery_failed = 1;
+    }
     if (marker_fd >= 0)
         close(marker_fd);
-    if (marker_writable && marker_restore_fd >= 0) {
+    if (marker_mode_changed && marker_restore_fd >= 0) {
         if (fchmod(marker_restore_fd, marker_mode) != 0) recovery_failed = 1;
     }
     if (marker_restore_fd >= 0)

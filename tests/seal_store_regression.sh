@@ -47,3 +47,13 @@ if [ "$(cat "$test_dir/fm")" != "$before" ]; then
     exit 1
 fi
 echo 'seal regression: pass'
+
+# security-scan must still scan symlinked source files (review PRRT_kwDOSsdSEM6o55Zt)
+mkdir -p "$test_dir/scanproj"
+printf 'x = eval(user_input)\n' > "$test_dir/scan-target.py"
+ln -s "$test_dir/scan-target.py" "$test_dir/scanproj/link.py"
+if ! (cd "$test_dir" && "$engine_bin" run security-scan "$test_dir/scanproj" 2>/dev/null) | grep -q '(1 issues'; then
+    echo 'symlinked source file was not scanned' >&2
+    exit 1
+fi
+echo 'security-scan symlink regression: pass'
