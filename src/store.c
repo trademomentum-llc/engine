@@ -30,7 +30,16 @@ static int open_store_dir_fd(const char *store_dir, int create_if_missing, int r
         return -1;
     }
 
-    int dirfd = open(store_dir, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    /* Canonicalize first so a store_dir that is itself a symlink keeps
+     * working (PRRT_kwDOSsdSEM6ti3ka); later operations stay anchored to
+     * the descriptor, and leaves are still opened with O_NOFOLLOW. */
+    char *canon = realpath(store_dir, NULL);
+    if (!canon) {
+        fprintf(stderr, "store: cannot access store directory: %s\n", store_dir);
+        return -1;
+    }
+    int dirfd = open(canon, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    free(canon);
     if (dirfd < 0) {
         fprintf(stderr, "store: cannot access store directory: %s\n", store_dir);
         return -1;

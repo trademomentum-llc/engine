@@ -31,6 +31,18 @@ int main(void) {
     assert(symlink("/etc/passwd", path) == 0);
     assert(lst_store_read(dir, "sample") == NULL);
     assert(unlink(path) == 0);
+
+    /* A store_dir that is itself a symlink must keep working
+     * (PRRT_kwDOSsdSEM6ti3ka). */
+    char link[512];
+    assert(snprintf(link, sizeof(link), "%s-link", dir) > 0);
+    assert(symlink(dir, link) == 0);
+    assert(lst_store_write(art, link) == 0);
+    lst_artifact_t *via_link = lst_store_read(link, "sample");
+    assert(via_link && via_link->magic == art->magic);
+    free(via_link);
+    assert(unlink(link) == 0);
+    assert(unlink(path) == 0);
     assert(rmdir(dir) == 0);
     free(art);
     puts("store regression: pass");
