@@ -114,3 +114,22 @@ done
 rm -rf "$test_dir/legacy-real.sealed"
 "$engine_bin" verify "$test_dir/legacy-link"
 echo 'fail-closed marker regression: pass'
+
+# rollback must still truncate and report incomplete recovery when its size check fails (PRRT_kwDOSsdSEM6tivXV)
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+fault_bin="$test_dir/engine-fault"
+cc -std=c11 -O2 -DSEAL_FAULT_INJECTION -I "$repo_root/include" -o "$fault_bin" \
+    $(sed -n '/^SRC/,/^TARGET/p' "$repo_root/Makefile" | grep -o '[a-z_/]*\.c' | sed "s|^|$repo_root/|")
+printf 'rollback-fstat\n' > "$test_dir/rf"
+"$fault_bin" seal "$test_dir/rf"
+rf_before="$(cat "$test_dir/rf")"
+rf_err="$(SEAL_FAULT_AFTER_APPEND=1 SEAL_FAULT_ROLLBACK_FSTAT=1 timeout 3 "$fault_bin" amend "$test_dir/rf" 'should-not-land' 2>&1 || true)"
+if [ "$(cat "$test_dir/rf")" != "$rf_before" ]; then
+    echo 'rollback skipped truncation after a failed size check' >&2
+    exit 1
+fi
+if ! printf '%s\n' "$rf_err" | grep -q 'recovery incomplete'; then
+    echo "rollback did not report incomplete recovery: $rf_err" >&2
+    exit 1
+fi
+echo 'rollback size-check regression: pass'

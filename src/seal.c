@@ -749,6 +749,10 @@ int lst_seal_amend(const char *file_path, const char *amendment) {
         goto amend_fail;
     }
     f = NULL;
+#ifdef SEAL_FAULT_INJECTION
+    if (getenv("SEAL_FAULT_AFTER_APPEND"))
+        goto amend_fail;
+#endif
 
     /* Make seal marker writable, then re-seal */
     if (seal_marker_path(marker, sizeof(marker), leaf) != 0)
@@ -841,9 +845,23 @@ amend_fail:
          * inode; `fd` is normally O_RDONLY and would fail with EBADF. */
         int wfd = rollback_fd >= 0 ? rollback_fd : fd;
         struct stat current_st;
-        if (fstat(wfd, &current_st) == 0 &&
-            ((amendment_is_append && current_st.st_size > original_size) ||
-             (!amendment_is_append && current_st.st_size != original_size))) {
+        int stat_rc = fstat(wfd, &current_st);
+#ifdef SEAL_FAULT_INJECTION
+        /* Test-only build (-DSEAL_FAULT_INJECTION): simulate a failing size
+         * check so the rollback path below can be regression-tested. */
+        if (getenv("SEAL_FAULT_ROLLBACK_FSTAT")) {
+            stat_rc = -1;
+            errno = EIO;
+        }
+#endif
+        if (stat_rc != 0) {
+            /* Size unknown: still attempt the rollback through the held
+             * writable descriptor, and report recovery as incomplete since
+             * it could not be confirmed. */
+            recovery_failed = 1;
+            (void)ftruncate(wfd, original_size);
+        } else if ((amendment_is_append && current_st.st_size > original_size) ||
+                   (!amendment_is_append && current_st.st_size != original_size)) {
             if (ftruncate(wfd, original_size) != 0) recovery_failed = 1;
         }
         if (futimens(wfd, original_times) != 0) recovery_failed = 1;
