@@ -27,4 +27,4 @@ jobs:
         run: |
           PYTHONPATH=nnos python3 -m unittest nnos.neurobalance.test_coordinator_efficiency
           python3 -m compileall -q nnos telemetry
-          bash -n nnos/scripts/*.sh
+          for script in nnos/scripts/*.sh; do bash -n "$script"; done
