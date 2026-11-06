@@ -33,7 +33,10 @@
  * -------------------------------------------------------------------------- */
 
 static char *read_file_sec(const char *path, size_t *out_len) {
-    FILE *f = fopen(path, "rb");
+    /* scan_dir_security() selects entries with stat(), which follows
+     * symlinks; open through the canonical path so symlinked sources are
+     * scanned rather than silently skipped (false zero-issue report). */
+    FILE *f = lst_secure_fopen_resolved(path);
     if (!f) return NULL;
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
@@ -326,7 +329,13 @@ static void scan_dir_security(lst_artifact_t *art, const char *dir, int depth) {
         if (should_skip_sec(ent->d_name)) continue;
 
         char child[LST_MAX_PATH];
-        snprintf(child, sizeof(child), "%s/%s", dir, ent->d_name);
+        {
+            int child_len = snprintf(child, sizeof(child), "%s/%s", dir, ent->d_name);
+            if (child_len < 0 || (size_t)child_len >= sizeof(child)) {
+                fprintf(stderr, "path too long, skipped: %s/%s\n", dir, ent->d_name);
+                continue;
+            }
+        }
 
         struct stat st;
         if (stat(child, &st) != 0) continue;

@@ -55,6 +55,15 @@ FILE *lst_secure_fopen(const char *path, const char *mode) {
     return f;
 }
 
+FILE *lst_secure_fopen_resolved(const char *path) {
+    if (!path) return NULL;
+    char *canon = realpath(path, NULL);
+    if (!canon) return NULL;
+    FILE *f = lst_secure_fopen(canon, "rb");
+    free(canon);
+    return f;
+}
+
 /* Safe string copy into fixed buffer */
 static void scopy(char *dst, const char *src, size_t maxlen) {
     if (!src) { dst[0] = '\0'; return; }
@@ -68,7 +77,7 @@ static void scopy(char *dst, const char *src, size_t maxlen) {
 static void strim(char *s) {
     char *start = s;
     while (*start && isspace((unsigned char)*start)) start++;
-    if (start != s) memmove(s, start, strlen(s) + 1);
+    if (start != s) memmove(s, start, strlen(start) + 1);
     size_t len = strlen(s);
     while (len > 0 && isspace((unsigned char)s[len - 1])) s[--len] = '\0';
 }
@@ -121,11 +130,16 @@ static int dir_exists(const char *path) {
 }
 
 /* Build a path: base/a/b into dst */
+/* On overflow, report it and leave dst empty rather than a truncated path
+ * (which could name a different file); opening "" then fails cleanly. */
 static void path_join(char *dst, size_t maxlen, const char *base, const char *a, const char *b) {
-    if (b)
-        snprintf(dst, maxlen, "%s/%s/%s", base, a, b);
-    else
-        snprintf(dst, maxlen, "%s/%s", base, a);
+    int n = b ? snprintf(dst, maxlen, "%s/%s/%s", base, a, b)
+              : snprintf(dst, maxlen, "%s/%s", base, a);
+    if (n < 0 || (size_t)n >= maxlen) {
+        fprintf(stderr, "lst: path too long, skipped: %s/%s%s%s\n",
+                base, a, b ? "/" : "", b ? b : "");
+        if (maxlen > 0) dst[0] = '\0';
+    }
 }
 
 /* --------------------------------------------------------------------------
@@ -164,6 +178,7 @@ static int json_get_string(const char *json, const char *key, char *dst, size_t 
 static int json_get_license(const char *json, char *dst, size_t maxlen) {
     dst[0] = '\0';
     const char *p = strstr(json, "\"license\"");
+    int found = 0;
     if (!p) return 0;
     p += 9; /* strlen("\"license\"") */
     while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == ':')) p++;
@@ -173,8 +188,10 @@ static int json_get_license(const char *json, char *dst, size_t maxlen) {
         p++;
         size_t i = 0;
         while (*p && *p != '"' && i < maxlen - 1) dst[i++] = *p++;
-    }
-    if (*p == '[') {
+        dst[i] = '\0';
+        if (*p == '"') p++;
+        found = 1;
+    } else if (*p == '[') {
         /* Array — join with " OR " */
         size_t off = 0;
         int first = 1;
@@ -192,9 +209,10 @@ static int json_get_license(const char *json, char *dst, size_t maxlen) {
             }
         }
         dst[off] = '\0';
-        return 1;
+        if (*p == ']') p++;
+        found = 1;
     }
-    return 0;
+    return found;
 }
 
 /* Map license string to license_t enum */
@@ -347,11 +365,47 @@ lst_artifact_t *lst_create(const char *project_path) {
     art->version = 1;
     art->built_at = time(NULL);
 
-    scopy(art->project_path, project_path, LST_MAX_PATH);
+    /* Store the canonical project path so recipe scanners that join
+     * art->project_path with readdir() names never feed lst_secure_fopen()
+     * a spelling that still contains ".." (which it rejects). Falls back
+     * to the raw spelling if the path cannot be resolved. */
+    char *rp = realpath(project_path, NULL);
+    const char *base = rp ? rp : project_path;
+    /* Refuse rather than truncate: a silently shortened path would point the
+     * scanners and recipes at a different (or nonexistent) directory. */
+    /* Also reserve room for "/<entry>" so the scanners' child paths
+     * (dir + "/" + a readdir() name of up to LST_MAX_NAME-1 bytes) are not
+     * truncated for roots just under the limit. Fail explicitly. */
+    if (strlen(base) + 1 + LST_MAX_NAME >= LST_MAX_PATH) {
+        fprintf(stderr, "lst: project path too long (max %d bytes): %s\n",
+                LST_MAX_PATH - LST_MAX_NAME - 2, base);
+        free(rp);
+        free(art);
+        return NULL;
+    }
+    scopy(art->project_path, base, LST_MAX_PATH);
 
-    /* Extract project name from path */
-    const char *name = strrchr(project_path, '/');
-    scopy(art->project_name, name ? name + 1 : project_path, LST_MAX_NAME);
+    /* Extract project name from the (canonical) path's basename, so raw
+     * spellings like "." or "dir/" still yield a usable, store-safe name. */
+    const char *name = base;
+    size_t base_len = strlen(base);
+    while (base_len > 1 && base[base_len - 1] == '/')
+        base_len--;
+    for (size_t i = base_len; i > 0; i--) {
+        if (base[i - 1] == '/') {
+            name = base + i;
+            break;
+        }
+    }
+    if (base_len == 1 && base[0] == '/') {
+        scopy(art->project_name, "root", LST_MAX_NAME);
+    } else {
+        size_t name_len = base_len - (size_t)(name - base);
+        if (name_len >= LST_MAX_NAME) name_len = LST_MAX_NAME - 1;
+        memcpy(art->project_name, name, name_len);
+        art->project_name[name_len] = '\0';
+    }
+    free(rp);
 
     return art;
 }
