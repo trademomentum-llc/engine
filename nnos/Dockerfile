@@ -38,6 +38,13 @@ COPY --from=builder /build/build/SystemIntegrityDaemon /usr/bin/
 COPY --from=builder /build/build/ThreatIntelligenceManager /usr/bin/
 COPY --from=builder /build/build/MorphogeneticMaintainer /usr/bin/
 
+# Non-root runtime user. /var/log/lsa is the only expected writable path.
+RUN groupadd --system --gid 10001 nnos \
+    && useradd --system --uid 10001 --gid 10001 --no-create-home --home-dir /var/log/lsa --shell /usr/sbin/nologin nnos \
+    && chown -R nnos:nnos /var/log/lsa
+
+USER nnos
+
 # Default: run DCN boot daemon (master supervision)
 # Override per node via deployment config
 CMD ["/usr/bin/lsa_boot_dcn"]
